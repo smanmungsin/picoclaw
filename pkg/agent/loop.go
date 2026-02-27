@@ -38,6 +38,7 @@ type AgentLoop struct {
 	summarizing    sync.Map
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
+	brain          *AgentBrain
 }
 
 // processOptions configures how a message is processed
@@ -53,30 +54,34 @@ type processOptions struct {
 }
 
 func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers.LLMProvider) *AgentLoop {
-	registry := NewAgentRegistry(cfg, provider)
+   registry := NewAgentRegistry(cfg, provider)
 
-	// Register shared tools to all agents
-	registerSharedTools(cfg, msgBus, registry, provider)
+   // Register shared tools to all agents
+   registerSharedTools(cfg, msgBus, registry, provider)
 
-	// Set up shared fallback chain
-	cooldown := providers.NewCooldownTracker()
-	fallbackChain := providers.NewFallbackChain(cooldown)
+   // Set up shared fallback chain
+   cooldown := providers.NewCooldownTracker()
+   fallbackChain := providers.NewFallbackChain(cooldown)
 
-	// Create state manager using default agent's workspace for channel recording
-	defaultAgent := registry.GetDefaultAgent()
-	var stateManager *state.Manager
-	if defaultAgent != nil {
-		stateManager = state.NewManager(defaultAgent.Workspace)
-	}
+   // Create state manager using default agent's workspace for channel recording
+   defaultAgent := registry.GetDefaultAgent()
+   var stateManager *state.Manager
+   if defaultAgent != nil {
+	   stateManager = state.NewManager(defaultAgent.Workspace)
+   }
 
-	return &AgentLoop{
-		bus:         msgBus,
-		cfg:         cfg,
-		registry:    registry,
-		state:       stateManager,
-		summarizing: sync.Map{},
-		fallback:    fallbackChain,
-	}
+   // Initialize the agent brain
+   agentBrain := GetAgentBrain()
+
+   return &AgentLoop{
+	   bus:         msgBus,
+	   cfg:         cfg,
+	   registry:    registry,
+	   state:       stateManager,
+	   summarizing: sync.Map{},
+	   fallback:    fallbackChain,
+	   brain:       agentBrain,
+   }
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -160,15 +165,20 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		default:
-			msg, ok := al.bus.ConsumeInbound(ctx)
-			if !ok {
-				continue
-			}
+			   msg, ok := al.bus.ConsumeInbound(ctx)
+			   if !ok {
+				   continue
+			   }
 
-			response, err := al.processMessage(ctx, msg)
-			if err != nil {
-				response = fmt.Sprintf("Error processing message: %v", err)
-			}
+			   // Log inbound message to brain timeline
+			   if al.brain != nil {
+				   al.brain.Brain.LogEvent("inbound_message", msg)
+			   }
+
+			   response, err := al.processMessage(ctx, msg)
+			   if err != nil {
+				   response = fmt.Sprintf("Error processing message: %v", err)
+			   }
 
 			if response != "" {
 				// Check if the message tool already sent a response during this round.
