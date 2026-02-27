@@ -199,10 +199,19 @@ type ChannelsConfig struct {
 	QQ       QQConfig       `json:"qq"`
 	DingTalk DingTalkConfig `json:"dingtalk"`
 	Slack    SlackConfig    `json:"slack"`
+	MSTeams  MSTeamsConfig  `json:"msteams"`
 	LINE     LINEConfig     `json:"line"`
 	OneBot   OneBotConfig   `json:"onebot"`
 	WeCom    WeComConfig    `json:"wecom"`
 	WeComApp WeComAppConfig `json:"wecom_app"`
+// MSTeamsConfig holds configuration for Microsoft Teams channel
+type MSTeamsConfig struct {
+	Enabled      bool                `json:"enabled"       env:"PICOCLAW_CHANNELS_MSTEAMS_ENABLED"`
+	AppID        string              `json:"app_id"        env:"PICOCLAW_CHANNELS_MSTEAMS_APP_ID"`
+	AppSecret    string              `json:"app_secret"    env:"PICOCLAW_CHANNELS_MSTEAMS_APP_SECRET"`
+	TenantID     string              `json:"tenant_id"     env:"PICOCLAW_CHANNELS_MSTEAMS_TENANT_ID"`
+	AllowFrom    FlexibleStringSlice `json:"allow_from"    env:"PICOCLAW_CHANNELS_MSTEAMS_ALLOW_FROM"`
+}
 }
 
 type WhatsAppConfig struct {

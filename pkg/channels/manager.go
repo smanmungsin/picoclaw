@@ -1,3 +1,15 @@
+   if m.config.Channels.MSTeams.Enabled && m.config.Channels.MSTeams.AppID != "" {
+	   logger.DebugC("channels", "Attempting to initialize MS Teams channel")
+	   msteams, err := NewMSTeamsChannel(m.config.Channels.MSTeams, m.bus)
+	   if err != nil {
+		   logger.ErrorCF("channels", "Failed to initialize MS Teams channel", map[string]any{
+			   "error": err.Error(),
+		   })
+	   } else {
+		   m.channels["msteams"] = msteams
+		   logger.InfoC("channels", "MS Teams channel enabled successfully")
+	   }
+   }
 // PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
