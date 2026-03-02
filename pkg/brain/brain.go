@@ -300,6 +300,8 @@ type Brain struct {
 	Security     *SecurityModule
 
 	eventStorePath string // path for event store persistence
+	// Peer communication
+	knownPeers []SelfIdentity // List of known peer agents
 }
 
 // PeerBackupRequest represents a request to backup all data to other replicas
@@ -349,6 +351,7 @@ func NewBrain(shortTerm, longTerm MemoryModule) *Brain {
 		eventStorePath: "event_store.json",
 	}
 	b.RecoverEventStore()
+	b.knownPeers = []SelfIdentity{} // Initialize known peers
 	return b
 }
 
@@ -678,6 +681,57 @@ func (b *Brain) Summarize() error {
 	}
 	b.Timeline = b.Timeline[:0]
 	return err
+}
+
+// ShareDataWithPeers broadcasts selected data to all known peers for collaborative improvement
+func (b *Brain) ShareDataWithPeers(data any) {
+	summary := "Shared data: " + fmt.Sprintf("%v", data)
+	for _, peer := range b.knownPeers {
+		addr := peer.Addr
+		conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+		if err != nil {
+			b.LogEvent("peer_share_network_error", fmt.Sprintf("Failed to connect to %s: %v", addr, err))
+			continue
+		}
+		defer conn.Close()
+		msg := map[string]string{
+			"type":     "SHARE_DATA",
+			"identity": peer.Name,
+			"data":     summary,
+		}
+		dataBytes, _ := json.Marshal(msg)
+		_, err = conn.Write(append(dataBytes, '\n'))
+		if err != nil {
+			b.LogEvent("peer_share_network_error", fmt.Sprintf("Failed to send shared data to %s: %v", addr, err))
+			continue
+		}
+		buf := make([]byte, 1024)
+		n, err := conn.Read(buf)
+		if err == nil && strings.Contains(string(buf[:n]), "SHARE_ACCEPTED") {
+			b.LogEvent("peer_share_response", fmt.Sprintf("Peer %s accepted shared data", peer.Name))
+		} else {
+			b.LogEvent("peer_share_response", fmt.Sprintf("Peer %s declined or failed to accept shared data", peer.Name))
+		}
+	}
+}
+
+// ReceiveSharedData processes incoming shared data from peers and integrates it for self-improvement
+func (b *Brain) ReceiveSharedData(data any, fromPeer string) {
+	// Integrate shared data into timeline and self-reflection
+	b.LogEvent("peer_data_received", fmt.Sprintf("Received from %s: %v", fromPeer, data))
+	if b.SelfReflect != nil {
+		b.SelfReflect.improvementPlan.Steps = append(b.SelfReflect.improvementPlan.Steps, "Incorporated shared data from peer: "+fromPeer)
+		b.SelfReflect.Analyze()
+		if b.ReportFunc != nil {
+			summary := "[Brain] Received shared data from " + fromPeer + ". Updated improvement plan: " + b.SelfReflect.improvementPlan.Goal + ". Steps: " + joinSteps(b.SelfReflect.improvementPlan.Steps)
+			b.ReportFunc(summary)
+		}
+	}
+}
+
+// AddKnownPeer registers a new peer agent for sharing
+func (b *Brain) AddKnownPeer(peer SelfIdentity) {
+	b.knownPeers = append(b.knownPeers, peer)
 }
 
 // AskPeersForBackup broadcasts a backup request to discovered peers using real network logic
