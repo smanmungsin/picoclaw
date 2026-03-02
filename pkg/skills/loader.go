@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
 )
@@ -23,6 +26,9 @@ type SkillsLoader struct {
 	globalSkills    string // 全局 skills (~/.picoclaw/skills)
 	builtinSkills   string // 内置 skills
 
+	watcher         *fsnotify.Watcher
+	watchMu         sync.Mutex
+	hotReloadActive bool
 }
 
 type SkillInfo struct {
@@ -60,12 +66,79 @@ const (
 )
 
 func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string) *SkillsLoader {
-	return &SkillsLoader{
+	sl := &SkillsLoader{
 		workspace:       workspace,
 		workspaceSkills: filepath.Join(workspace, "skills"),
 		globalSkills:    globalSkills, // ~/.picoclaw/skills
 		builtinSkills:   builtinSkills,
 	}
+	// Enable hot-reloading by default
+	if err := sl.StartHotReloading(); err != nil {
+		slog.Warn("Hot-reloading could not be started", "error", err)
+	}
+	return sl
+}
+
+// StartHotReloading enables hot-reloading for skills and modules
+func (sl *SkillsLoader) StartHotReloading() error {
+	sl.watchMu.Lock()
+	defer sl.watchMu.Unlock()
+	if sl.hotReloadActive {
+		return nil // Already active
+	}
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	skillDirs := []string{}
+	if sl.workspaceSkills != "" {
+		skillDirs = append(skillDirs, sl.workspaceSkills)
+	}
+	if sl.globalSkills != "" {
+		skillDirs = append(skillDirs, sl.globalSkills)
+	}
+	if sl.builtinSkills != "" {
+		skillDirs = append(skillDirs, sl.builtinSkills)
+	}
+	for _, dir := range skillDirs {
+		if err := w.Add(dir); err != nil {
+			slog.Warn("Failed to watch skill dir", "dir", dir, "error", err)
+		}
+	}
+	sl.watcher = w
+	sl.hotReloadActive = true
+	go sl.handleHotReloadEvents()
+	return nil
+}
+
+// handleHotReloadEvents processes fsnotify events and reloads skills
+func (sl *SkillsLoader) handleHotReloadEvents() {
+	for {
+		select {
+		case event, ok := <-sl.watcher.Events:
+			if !ok {
+				return
+			}
+			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) != 0 {
+				slog.Info("Hot-reload: skill file changed", "file", event.Name, "op", event.Op.String())
+				sl.ReloadSkills()
+			}
+		case err, ok := <-sl.watcher.Errors:
+			if !ok {
+				return
+			}
+			slog.Warn("Hot-reload watcher error", "error", err)
+		}
+	}
+}
+
+// ReloadSkills reloads all skills (can be extended to reload only changed ones)
+func (sl *SkillsLoader) ReloadSkills() {
+	slog.Info("Reloading skills due to change detected")
+	// This can be extended to reload only changed skills
+	// For now, just refresh the skill list
+	_ = sl.ListSkills()
+	sl.notifyAgent("Skills hot-reloaded")
 }
 
 // MergeSkillsFromPeer merges skills from a peer's skills summary (XML format expected)

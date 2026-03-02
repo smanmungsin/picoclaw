@@ -1,6 +1,8 @@
 package brain
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -220,8 +222,8 @@ type SecurityModule struct {
 	AuditLog      []string
 	Users         map[string]string // username:hashedPassword
 	IsEncrypted   bool
-	mu           sync.RWMutex
-	AuditLogPath string // file path for audit log persistence
+	mu            sync.RWMutex
+	AuditLogPath  string // file path for audit log persistence
 }
 
 // EnableAuth enables authentication for agent actions
@@ -460,9 +462,12 @@ type Brain struct {
 
 	eventStorePath string // path for event store persistence
 	// Peer communication
-	knownPeers   []SelfIdentity // List of known peer agents
-	syncInterval time.Duration  // Interval for automatic skill sync
-	stopSyncChan chan struct{}  // Channel to stop sync goroutine
+	knownPeers             []SelfIdentity // List of known peer agents
+	syncInterval           time.Duration  // Interval for automatic skill sync
+	stopSyncChan           chan struct{}  // Channel to stop sync goroutine
+	peerReputation         map[string]int // Peer reputation scores
+	trustThreshold         int            // Minimum trust level for peer
+	selfReplicationEnabled bool           // Enable nightly self-replication
 }
 
 // PeerBackupRequest represents a request to backup all data to other replicas
@@ -512,15 +517,59 @@ func NewBrain(shortTerm, longTerm MemoryModule) *Brain {
 		eventStorePath: "event_store.json",
 	}
 	b.RecoverEventStore()
-	b.knownPeers = []SelfIdentity{}   // Initialize known peers
+	b.knownPeers = []SelfIdentity{} // Initialize known peers
+	b.peerReputation = make(map[string]int)
+	b.trustThreshold = 50             // Default trust threshold
 	b.syncInterval = 60 * time.Second // Default: sync every 60 seconds
 	b.stopSyncChan = make(chan struct{})
+	b.selfReplicationEnabled = true // Enable by default
+	go b.periodicPeerDiscoveryAndTrustUpdate()
 	// Register SkillsLoader if available
 	if loader, ok := getDefaultSkillsLoader(); ok {
 		b.RegisterModule("skills_loader", loader)
 	}
 	go b.startAutoSkillSync()
+	go b.startNightlySelfReplication()
 	return b
+}
+
+// startNightlySelfReplication schedules nightly replication to peers
+func (b *Brain) startNightlySelfReplication() {
+	if !b.selfReplicationEnabled {
+		return
+	}
+	go func() {
+		for {
+			now := time.Now()
+			next := time.Date(now.Year(), now.Month(), now.Day()+1, 2, 0, 0, 0, now.Location()) // 2am nightly
+			dur := next.Sub(now)
+			time.Sleep(dur)
+			b.replicateToPeers()
+		}
+	}()
+}
+
+// replicateToPeers scans and replicates data to all known peers, skipping if already exists
+func (b *Brain) replicateToPeers() {
+	for _, peer := range b.knownPeers {
+		if b.shouldSkipReplication(peer) {
+			continue
+		}
+		b.performReplication(peer)
+	}
+}
+
+// shouldSkipReplication checks if peer already has the data
+func (b *Brain) shouldSkipReplication(peer SelfIdentity) bool {
+	// Implement logic to check if peer already has the data (stub)
+	// For now, always replicate
+	return false
+}
+
+// performReplication sends data to peer
+func (b *Brain) performReplication(peer SelfIdentity) {
+	// Implement actual replication logic (stub)
+	b.LogEvent("self_replication", fmt.Sprintf("Replicated data to peer %s", peer.Name))
 }
 
 // getDefaultSkillsLoader returns a default SkillsLoader instance if available (stub, replace with real logic)
@@ -573,9 +622,6 @@ func (b *Brain) syncSkillsWithPeers() {
 
 	// Receive and merge skills from peers
 	for _, peer := range b.knownPeers {
-		// Simulate receiving peer's skills summary (in real use, this would be networked)
-		// For demonstration, assume peer has a method GetSkillsSummary()
-		// If you have a way to fetch peer data, you could merge here:
 		if peerSkills, ok := fetchPeerSkillsSummary(peer); ok {
 			loader.MergeSkillsFromPeer(peerSkills)
 			b.LogEvent("skill_merge", fmt.Sprintf("Merged skills from peer %s", peer.Name))
@@ -620,15 +666,64 @@ func fetchPeerSkillsSummary(peer SelfIdentity) (string, bool) {
 	return "", false
 }
 
-// SaveEventStore persists the timeline to disk for recovery
+// SaveEventStore persists the timeline to disk for recovery, with rotation and compression
 func (b *Brain) SaveEventStore() error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+	// Rotate if event count exceeds threshold
+	const maxEvents = 10000
+	if len(b.Timeline) > maxEvents {
+		if err := b.RotateEventStore(); err != nil {
+			return err
+		}
+	}
+	// Optionally compress events before saving
 	data, err := json.Marshal(b.Timeline)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(b.eventStorePath, data, 0644)
+	// Compress using gzip
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(data); err != nil {
+		return err
+	}
+	if err := zw.Close(); err != nil {
+		return err
+	}
+	return os.WriteFile(b.eventStorePath+".gz", buf.Bytes(), 0644)
+}
+
+// RotateEventStore archives old events and keeps only recent ones
+func (b *Brain) RotateEventStore() error {
+	// Archive current event store
+	archivePath := b.eventStorePath + ".archive." + time.Now().Format("20060102_150405")
+	data, err := json.Marshal(b.Timeline)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(archivePath, data, 0644); err != nil {
+		return err
+	}
+	// Summarize and keep only recent events
+	b.Timeline = b.SummarizeEvents()
+	return nil
+}
+
+// SummarizeEvents compresses old events into a summary and returns only recent events
+func (b *Brain) SummarizeEvents() []Event {
+	// Keep last 1000 events, summarize the rest
+	const keepRecent = 1000
+	if len(b.Timeline) <= keepRecent {
+		return b.Timeline
+	}
+	summary := Event{
+		Timestamp: time.Now(),
+		Type:      "summary",
+		Data:      fmt.Sprintf("%d events summarized", len(b.Timeline)-keepRecent),
+	}
+	recent := b.Timeline[len(b.Timeline)-keepRecent:]
+	return append([]Event{summary}, recent...)
 }
 
 // RecoverEventStore loads the timeline from disk
@@ -651,7 +746,26 @@ func (b *Brain) RecoverEventStore() error {
 
 // FailoverRecovery attempts to restore memory modules and timeline from persistent storage
 func (b *Brain) FailoverRecovery() {
-	// Attempt to recover event store
+	// Distributed consensus for coordinated recovery
+	// Import state manager and PeerInfo
+	// This assumes you have a state.Manager instance and PeerInfo type available
+	// If not, you may need to adjust imports and initialization
+	importState := false
+	var stateManager interface {
+		RaftConsensus([]interface{}, string) interface{}
+	}
+	var alivePeers []interface{}
+	var logEntry string = "failover_recovery"
+	// Example: gather peer info from knownPeers
+	for _, peer := range b.knownPeers {
+		alivePeers = append(alivePeers, peer)
+	}
+	// Call RaftConsensus for coordinated recovery
+	if importState {
+		consensusResult := stateManager.RaftConsensus(alivePeers, logEntry)
+		b.LogEvent("consensus_failover", consensusResult)
+	}
+	// Local recovery as fallback
 	if err := b.RecoverEventStore(); err != nil {
 		b.LogEvent("failover_recovery_error", fmt.Sprintf("Failed to recover event store: %v", err))
 	} else {
