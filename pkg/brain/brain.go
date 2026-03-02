@@ -220,8 +220,8 @@ type SecurityModule struct {
 	AuditLog      []string
 	Users         map[string]string // username:hashedPassword
 	IsEncrypted   bool
-	// Use a mutex for thread safety
-	mu sync.RWMutex
+	mu           sync.RWMutex
+	AuditLogPath string // file path for audit log persistence
 }
 
 // EnableAuth enables authentication for agent actions
@@ -246,6 +246,47 @@ func (s *SecurityModule) LogAudit(event string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AuditLog = append(s.AuditLog, event)
+	// Persist audit log to disk
+	if s.AuditLogPath != "" {
+		_ = s.saveAuditLog()
+	}
+}
+
+// saveAuditLog writes the audit log to disk
+func (s *SecurityModule) saveAuditLog() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.AuditLogPath == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(s.AuditLog, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.AuditLogPath, data, 0644)
+}
+
+// loadAuditLog loads the audit log from disk
+func (s *SecurityModule) loadAuditLog() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.AuditLogPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(s.AuditLogPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.AuditLog = []string{}
+			return nil
+		}
+		return err
+	}
+	var log []string
+	if err := json.Unmarshal(data, &log); err != nil {
+		return err
+	}
+	s.AuditLog = log
+	return nil
 }
 
 // AddUser adds a user with a hashed password
