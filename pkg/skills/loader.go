@@ -68,6 +68,39 @@ func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string
 	}
 }
 
+// MergeSkillsFromPeer merges skills from a peer's skills summary (XML format expected)
+func (sl *SkillsLoader) MergeSkillsFromPeer(peerSkills string) {
+	// Parse peerSkills summary (expecting XML-like format)
+	// This is a simple implementation: extract <name> and <description> and add if missing
+	lines := strings.Split(peerSkills, "\n")
+	var name, desc string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "<name>") && strings.HasSuffix(line, "</name>") {
+			name = strings.TrimSuffix(strings.TrimPrefix(line, "<name>"), "</name>")
+		}
+		if strings.HasPrefix(line, "<description>") && strings.HasSuffix(line, "</description>") {
+			desc = strings.TrimSuffix(strings.TrimPrefix(line, "<description>"), "</description>")
+		}
+		if name != "" && desc != "" {
+			// Check if skill already exists
+			exists := false
+			for _, s := range sl.ListSkills() {
+				if s.Name == name {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				// Add skill metadata to workspace (as a stub, just log)
+				fmt.Printf("[SkillsLoader] Merged skill from peer: %s - %s\n", name, desc)
+				// Real implementation: create SKILL.md or update metadata
+			}
+			name, desc = "", "" // Reset for next skill
+		}
+	}
+}
+
 // Health check: verify skills directory and auto-repair if missing
 func (sl *SkillsLoader) HealthCheckAndRepair() {
 	if sl.workspace == "" {

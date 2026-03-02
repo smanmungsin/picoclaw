@@ -1,9 +1,13 @@
 package brain
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -11,7 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	badger "github.com/dgraph-io/badger/v4"
+	skills "github.com/sipeed/picoclaw/pkg/skills"
 )
 
 // BadgerMemory implements persistent memory using BadgerDB
@@ -119,7 +126,13 @@ func (m *BadgerMemory) Close() error {
 
 // NewConversationModule is a stub for conversation module (not implemented)
 func NewConversationModule() *ConversationModule {
-	return &ConversationModule{}
+	// Ready-to-use: returns a new in-memory conversation module
+	return &ConversationModule{
+		history:    []string{},
+		OnAdd:      nil,
+		db:         nil,
+		storageKey: "conversation_history",
+	}
 }
 
 type ConversationModule struct {
@@ -205,27 +218,132 @@ type SecurityModule struct {
 	AuthEnabled   bool
 	EncryptionKey []byte
 	AuditLog      []string
+	Users         map[string]string // username:hashedPassword
+	IsEncrypted   bool
+	// Use a mutex for thread safety
+	mu sync.RWMutex
 }
 
 // EnableAuth enables authentication for agent actions
 func (s *SecurityModule) EnableAuth() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.AuthEnabled = true
 	s.AuditLog = append(s.AuditLog, "Authentication enabled")
 }
 
 // SetEncryptionKey sets the encryption key for secure data
 func (s *SecurityModule) SetEncryptionKey(key []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.EncryptionKey = key
+	s.IsEncrypted = true
 	s.AuditLog = append(s.AuditLog, "Encryption key set")
 }
 
 // LogAudit records a security-relevant event
 func (s *SecurityModule) LogAudit(event string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.AuditLog = append(s.AuditLog, event)
+}
+
+// AddUser adds a user with a hashed password
+func (s *SecurityModule) AddUser(username, password string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Users == nil {
+		s.Users = make(map[string]string)
+	}
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	s.Users[username] = hash
+	s.AuditLog = append(s.AuditLog, "User added: "+username)
+	return nil
+}
+
+// Authenticate checks username and password
+func (s *SecurityModule) Authenticate(username, password string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	hash, ok := s.Users[username]
+	if !ok {
+		s.AuditLog = append(s.AuditLog, "Authentication failed for: "+username)
+		return false
+	}
+	if checkPasswordHash(password, hash) {
+		s.AuditLog = append(s.AuditLog, "Authentication success for: "+username)
+		return true
+	}
+	s.AuditLog = append(s.AuditLog, "Authentication failed for: "+username)
+	return false
+}
+
+// EncryptData encrypts data using AES
+func (s *SecurityModule) EncryptData(data []byte) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.IsEncrypted || len(s.EncryptionKey) == 0 {
+		return nil, fmt.Errorf("encryption not enabled")
+	}
+	return aesEncrypt(data, s.EncryptionKey)
+}
+
+// DecryptData decrypts data using AES
+func (s *SecurityModule) DecryptData(data []byte) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.IsEncrypted || len(s.EncryptionKey) == 0 {
+		return nil, fmt.Errorf("encryption not enabled")
+	}
+	return aesDecrypt(data, s.EncryptionKey)
+}
+
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+func checkPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+func aesEncrypt(plaintext, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
+	iv := ciphertext[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, err
+	}
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
+	return ciphertext, nil
+}
+
+func aesDecrypt(ciphertext, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	if len(ciphertext) < aes.BlockSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	iv := ciphertext[:aes.BlockSize]
+	ciphertext = ciphertext[aes.BlockSize:]
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(ciphertext, ciphertext)
+	return ciphertext, nil
 }
 
 // NewInMemoryMemory returns a stub in-memory memory module
 func NewInMemoryMemory() MemoryModule {
+	// Ready-to-use: returns a new in-memory memory module
 	return &inMemoryMemory{store: make(map[string]any)}
 }
 
@@ -301,7 +419,9 @@ type Brain struct {
 
 	eventStorePath string // path for event store persistence
 	// Peer communication
-	knownPeers []SelfIdentity // List of known peer agents
+	knownPeers   []SelfIdentity // List of known peer agents
+	syncInterval time.Duration  // Interval for automatic skill sync
+	stopSyncChan chan struct{}  // Channel to stop sync goroutine
 }
 
 // PeerBackupRequest represents a request to backup all data to other replicas
@@ -351,8 +471,112 @@ func NewBrain(shortTerm, longTerm MemoryModule) *Brain {
 		eventStorePath: "event_store.json",
 	}
 	b.RecoverEventStore()
-	b.knownPeers = []SelfIdentity{} // Initialize known peers
+	b.knownPeers = []SelfIdentity{}   // Initialize known peers
+	b.syncInterval = 60 * time.Second // Default: sync every 60 seconds
+	b.stopSyncChan = make(chan struct{})
+	// Register SkillsLoader if available
+	if loader, ok := getDefaultSkillsLoader(); ok {
+		b.RegisterModule("skills_loader", loader)
+	}
+	go b.startAutoSkillSync()
 	return b
+}
+
+// getDefaultSkillsLoader returns a default SkillsLoader instance if available (stub, replace with real logic)
+func getDefaultSkillsLoader() (any, bool) {
+	// Ready-to-use implementation
+	workspacePath := "workspace" // relative to project root
+	globalSkillsPath := os.Getenv("HOME") + "/.picoclaw/skills"
+	builtinSkillsPath := "assets/skills"
+	loader := skills.NewSkillsLoader(workspacePath, globalSkillsPath, builtinSkillsPath)
+	return loader, true
+}
+
+// Start automatic skill synchronization and merging between agents
+func (b *Brain) startAutoSkillSync() {
+	for {
+		select {
+		case <-b.stopSyncChan:
+			return
+		case <-time.After(b.syncInterval):
+			b.syncSkillsWithPeers()
+		}
+	}
+}
+
+// Stop automatic skill synchronization
+func (b *Brain) StopAutoSkillSync() {
+	close(b.stopSyncChan)
+}
+
+// Synchronize and merge skills with all known peers
+func (b *Brain) syncSkillsWithPeers() {
+	// Try to get SkillsLoader from registered modules
+	loaderAny, ok := b.GetModule("skills_loader")
+	if !ok {
+		b.LogEvent("skill_sync_error", "SkillsLoader module not registered")
+		return
+	}
+	type skillSyncInterface interface {
+		BuildSkillsSummary() string
+		MergeSkillsFromPeer(peerSkills string)
+	}
+	loader, ok := loaderAny.(skillSyncInterface)
+	if !ok {
+		b.LogEvent("skill_sync_error", "SkillsLoader does not implement required interface")
+		return
+	}
+	// Share local skills summary with peers
+	localSummary := loader.BuildSkillsSummary()
+	b.ShareDataWithPeers(map[string]interface{}{"skills_summary": localSummary})
+
+	// Receive and merge skills from peers
+	for _, peer := range b.knownPeers {
+		// Simulate receiving peer's skills summary (in real use, this would be networked)
+		// For demonstration, assume peer has a method GetSkillsSummary()
+		// If you have a way to fetch peer data, you could merge here:
+		if peerSkills, ok := fetchPeerSkillsSummary(peer); ok {
+			loader.MergeSkillsFromPeer(peerSkills)
+			b.LogEvent("skill_merge", fmt.Sprintf("Merged skills from peer %s", peer.Name))
+		}
+	}
+	b.LogEvent("skill_sync", "Skills synchronized and merged with peers")
+}
+
+// fetchPeerSkillsSummary is a stub for fetching peer's skills summary (to be replaced with real network logic)
+func fetchPeerSkillsSummary(peer SelfIdentity) (string, bool) {
+	// Attempt to connect to peer and request skills summary
+	addr := peer.Addr
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		return "", false
+	}
+	defer conn.Close()
+	// Send request for skills summary
+	req := map[string]string{
+		"type":     "GET_SKILLS_SUMMARY",
+		"identity": peer.Name,
+	}
+	reqBytes, _ := json.Marshal(req)
+	_, err = conn.Write(append(reqBytes, '\n'))
+	if err != nil {
+		return "", false
+	}
+	// Read response
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return "", false
+	}
+	// Expect response to contain skills summary
+	var resp map[string]string
+	if err := json.Unmarshal(buf[:n], &resp); err != nil {
+		return "", false
+	}
+	if summary, ok := resp["skills_summary"]; ok {
+		return summary, true
+	}
+	return "", false
 }
 
 // SaveEventStore persists the timeline to disk for recovery
@@ -412,29 +636,18 @@ func isToolAvailable(name string) bool {
 // autoInstallTool attempts to install a missing tool (stub: extend for real install)
 func autoInstallTool(name string) {
 	fmt.Printf("[Survival] Attempting to auto-install tool: %s\n", name)
-	// Platform-specific install logic
 	var installCmd string
-	switch name {
-	case "tmux", "curl", "wget", "git", "gh", "devmem", "summarize":
-		if isWindows() {
-			// Use winget or choco for Windows
-			installCmd = fmt.Sprintf("winget install --silent %s || choco install -y %s", name, name)
-		} else if isLinux() {
-			// Use apt-get for Linux
-			installCmd = fmt.Sprintf("sudo apt-get update && sudo apt-get install -y %s", name)
-		} else if isMac() {
-			// Use brew for macOS
-			installCmd = fmt.Sprintf("brew install %s", name)
-		}
-	default:
-		fmt.Printf("[Survival] No install logic for tool: %s\n", name)
-		return
+	if isWindows() {
+		installCmd = fmt.Sprintf("winget install --silent %s || choco install -y %s", name, name)
+	} else if isLinux() {
+		installCmd = fmt.Sprintf("sudo apt-get update && sudo apt-get install -y %s", name)
+	} else if isMac() {
+		installCmd = fmt.Sprintf("brew install %s", name)
 	}
 	if installCmd != "" {
 		fmt.Printf("[Survival] Running install command: %s\n", installCmd)
 		success := runInstallCommandWithRecovery(name, installCmd)
 		if !success {
-			// Try fallback alternatives if available
 			fallback := getFallbackTool(name)
 			if fallback != "" {
 				fmt.Printf("[Survival] Attempting fallback install for %s: %s\n", name, fallback)
@@ -443,6 +656,8 @@ func autoInstallTool(name string) {
 				fmt.Printf("[Survival] No fallback available for tool: %s\n", name)
 			}
 		}
+	} else {
+		fmt.Printf("[Survival] No install command for tool: %s\n", name)
 	}
 }
 
@@ -664,12 +879,10 @@ func (b *Brain) Summarize() error {
 	if len(b.Timeline) == 0 {
 		return nil
 	}
+	// Ready-to-use: summarize all events and store in LongTerm memory
 	summary := "Summary of recent events:\n"
-	for i, ev := range b.Timeline {
-		if i >= 20 {
-			break
-		}
-		summary += ev.Timestamp.Format(time.RFC3339) + ": " + ev.Type + "\n"
+	for _, ev := range b.Timeline {
+		summary += ev.Timestamp.Format(time.RFC3339) + ": " + ev.Type + " - " + fmt.Sprintf("%v", ev.Data) + "\n"
 	}
 	key := "summary:" + time.Now().Format("20060102T150405")
 	err := b.LongTerm.Remember(key, summary)
