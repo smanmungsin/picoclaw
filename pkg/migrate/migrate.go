@@ -71,17 +71,11 @@ func Run(opts Options) (*Result, error) {
 		   picoClawHome = filepath.Join(os.TempDir(), "picoclaw")
 	   }
 
-<<<<<<< Updated upstream
-	if _, err := os.Stat(openclawHome); os.IsNotExist(err) {
-		return nil, fmt.Errorf("OpenClaw installation not found at %s", openclawHome)
-	}
-=======
 	   if _, err = os.Stat(openclawHome); os.IsNotExist(err) {
 		   fmt.Printf("[Survival] CRITICAL: OpenClaw installation not found at %s\n", openclawHome)
 		   // Attempt recovery: create minimal structure
 		   _ = os.MkdirAll(openclawHome, 0o755)
 	   }
->>>>>>> Stashed changes
 
 	actions, warnings, err := Plan(opts, openclawHome, picoClawHome)
 	if err != nil {

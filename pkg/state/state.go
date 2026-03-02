@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 package state
 
 import (
@@ -9,25 +8,22 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+	"crypto/rand"
+	"encoding/base64"
+	"github.com/sipeed/picoclaw/pkg/fileutil"
 )
 
 // State represents the persistent state for a workspace.
-// It includes information about the last active channel/chat.
 type State struct {
-	// LastChannel is the last channel used for communication
 	LastChannel string `json:"last_channel,omitempty"`
+	LastChatID  string `json:"last_chat_id,omitempty"`
+	Timestamp   time.Time `json:"timestamp"`
+}
 
-	// LastChatID is the last chat ID used for communication
-	LastChatID string `json:"last_chat_id,omitempty"`
-
-	// Timestamp is the last time this state was updated
-	Timestamp time.Time `json:"timestamp"`
-=======
 // PersistentPeerRegistry manages known peers for robust state and recognition
 type PersistentPeerRegistry struct {
 	Peers map[string]PeerInfo // address -> info
 	File  string
->>>>>>> Stashed changes
 }
 
 func NewPersistentPeerRegistry(file string) *PersistentPeerRegistry {
@@ -61,6 +57,12 @@ func (reg *PersistentPeerRegistry) Save() {
 	enc := json.NewEncoder(f)
 	_ = enc.Encode(reg.Peers)
 }
+
+// GetPeerCount returns the current number of known peers
+func (reg *PersistentPeerRegistry) GetPeerCount() int {
+	return len(reg.Peers)
+}
+
 // ProtocolMessage represents a message exchanged for consensus
 type ProtocolMessage struct {
 	Type      string
@@ -70,320 +72,153 @@ type ProtocolMessage struct {
 	Term      int
 	Timestamp int64
 }
-// HandleProtocolMessage processes incoming Paxos/Raft messages
+
 func (sm *Manager) HandleProtocolMessage(msg ProtocolMessage, reg *PersistentPeerRegistry) ProtocolMessage {
-   switch msg.Type {
-   case "PREPARE":
-	   // Paxos prepare phase
-	   return ProtocolMessage{Type: "PROMISE", Sender: msg.Sender, Proposal: msg.Proposal, Term: msg.Term, Timestamp: time.Now().Unix()}
-   case "ACCEPT":
-	   // Paxos accept phase
-	   return ProtocolMessage{Type: "ACCEPTED", Sender: msg.Sender, Proposal: msg.Proposal, Term: msg.Term, Timestamp: time.Now().Unix()}
-   case "APPEND":
-	   // Raft log replication
-	   return ProtocolMessage{Type: "APPENDED", Sender: msg.Sender, LogEntry: msg.LogEntry, Term: msg.Term, Timestamp: time.Now().Unix()}
-   case "VOTE":
-	   // Raft vote request
-	   return ProtocolMessage{Type: "VOTED", Sender: msg.Sender, Term: msg.Term, Timestamp: time.Now().Unix()}
-   case "JOIN":
-	   // Peer joining civilization
-	   reg.AddPeer(PeerInfo{Addr: msg.Sender, Status: "ALIVE", LastSeen: time.Now(), Capabilities: []string{"consensus", "planning"}})
-	   return ProtocolMessage{Type: "WELCOME", Sender: msg.Sender, Timestamp: time.Now().Unix()}
-   default:
-	   return ProtocolMessage{Type: "UNKNOWN", Sender: msg.Sender, Timestamp: time.Now().Unix()}
-   }
+	switch msg.Type {
+	case "PREPARE":
+		return ProtocolMessage{Type: "PROMISE", Sender: msg.Sender, Proposal: msg.Proposal, Term: msg.Term, Timestamp: time.Now().Unix()}
+	case "ACCEPT":
+		return ProtocolMessage{Type: "ACCEPTED", Sender: msg.Sender, Proposal: msg.Proposal, Term: msg.Term, Timestamp: time.Now().Unix()}
+	case "APPEND":
+		return ProtocolMessage{Type: "APPENDED", Sender: msg.Sender, LogEntry: msg.LogEntry, Term: msg.Term, Timestamp: time.Now().Unix()}
+	case "VOTE":
+		return ProtocolMessage{Type: "VOTED", Sender: msg.Sender, Term: msg.Term, Timestamp: time.Now().Unix()}
+	case "JOIN":
+		reg.AddPeer(PeerInfo{Addr: msg.Sender, Status: "ALIVE", LastSeen: time.Now(), Capabilities: []string{"consensus", "planning"}})
+		return ProtocolMessage{Type: "WELCOME", Sender: msg.Sender, Timestamp: time.Now().Unix()}
+	default:
+		return ProtocolMessage{Type: "UNKNOWN", Sender: msg.Sender, Timestamp: time.Now().Unix()}
+	}
 }
-// CivilizationReady checks if enough peers are present for robust distributed planning
+
 func (reg *PersistentPeerRegistry) CivilizationReady(minPeers int) bool {
-   count := 0
-   for _, peer := range reg.Peers {
-	   if peer.Status == "ALIVE" {
-		   count++
-	   }
-   }
-   return count >= minPeers
+	count := 0
+	for _, peer := range reg.Peers {
+		if peer.Status == "ALIVE" {
+			count++
+		}
+	}
+	return count >= minPeers
 }
+
 // PaxosConsensus runs a basic Paxos-like consensus algorithm among peers
 func (sm *Manager) PaxosConsensus(alivePeers []PeerInfo, proposal string) ConsensusResult {
-   // Phase 1: Prepare
-   promises := 0
-   for _, peer := range alivePeers {
-	   // Simulate promise (in real system, send PREPARE message)
-	   promises++
-   }
-   // Phase 2: Accept
-   accepts := 0
-   for _, peer := range alivePeers {
-	   // Simulate accept (in real system, send ACCEPT message)
-	   accepts++
-   }
-   agreed := ""
-   if accepts > len(alivePeers)/2 {
-	   agreed = proposal
-   }
-   sm.notifyAgent(fmt.Sprintf("Paxos consensus: proposal=%s, accepted=%d/%d", proposal, accepts, len(alivePeers)))
-   return ConsensusResult{AgreedPlan: agreed, Leader: PeerInfo{}, Votes: nil}
+	// Phase 1: Prepare
+	promises := 0
+	for _, peer := range alivePeers {
+		// Simulate promise (in real system, send PREPARE message)
+		promises++
+	}
+	// Phase 2: Accept
+	accepts := 0
+	for _, peer := range alivePeers {
+		// Simulate accept (in real system, send ACCEPT message)
+		accepts++
+	}
+	agreed := ""
+	if accepts > len(alivePeers)/2 {
+		agreed = proposal
+	}
+	sm.notifyAgent(fmt.Sprintf("Paxos consensus: proposal=%s, accepted=%d/%d", proposal, accepts, len(alivePeers)))
+	return ConsensusResult{AgreedPlan: agreed, Leader: PeerInfo{}, Votes: nil}
 }
+
 // RaftConsensus runs a basic Raft-like consensus algorithm among peers
 func (sm *Manager) RaftConsensus(alivePeers []PeerInfo, logEntry string) ConsensusResult {
-   // Leader election: pick peer with lowest address
-   var leader PeerInfo
-   if len(alivePeers) > 0 {
-	   leader = alivePeers[0]
-	   for _, peer := range alivePeers {
-		   if peer.Addr < leader.Addr {
-			   leader = peer
-		   }
-	   }
-   }
-   // Log replication: send log entry to all peers
-   replicated := 0
-   for _, peer := range alivePeers {
-	   // Simulate log replication (in real system, send APPEND message)
-	   replicated++
-   }
-   agreed := ""
-   if replicated > len(alivePeers)/2 {
-	   agreed = logEntry
-   }
-   sm.notifyAgent(fmt.Sprintf("Raft consensus: logEntry=%s, replicated=%d/%d, leader=%s", logEntry, replicated, len(alivePeers), leader.Addr))
-   return ConsensusResult{AgreedPlan: agreed, Leader: leader, Votes: nil}
+	// Leader election: pick peer with lowest address
+	var leader PeerInfo
+	if len(alivePeers) > 0 {
+		leader = alivePeers[0]
+		for _, peer := range alivePeers {
+			if peer.Addr < leader.Addr {
+				leader = peer
+			}
+		}
+	}
+	// Log replication: send log entry to all peers
+	replicated := 0
+	for _, peer := range alivePeers {
+		// Simulate log replication (in real system, send APPEND message)
+		replicated++
+	}
+	agreed := ""
+	if replicated > len(alivePeers)/2 {
+		agreed = logEntry
+	}
+	sm.notifyAgent(fmt.Sprintf("Raft consensus: logEntry=%s, replicated=%d/%d, leader=%s", logEntry, replicated, len(alivePeers), leader.Addr))
+	return ConsensusResult{AgreedPlan: agreed, Leader: leader, Votes: nil}
 }
+
 // ConsensusResult represents the outcome of a distributed consensus
 type ConsensusResult struct {
 	AgreedPlan string
 	Leader     PeerInfo
 	Votes      map[string]string // peer address -> voted plan
 }
+
 // MajorityConsensus runs a majority voting algorithm among peers
 func (sm *Manager) MajorityConsensus(alivePeers []PeerInfo, candidatePlans []string) ConsensusResult {
-   votes := make(map[string]string)
-   planCounts := make(map[string]int)
-   for _, peer := range alivePeers {
-	   // Simulate peer voting (in real system, request vote from peer)
-	   chosen := candidatePlans[time.Now().UnixNano()%int64(len(candidatePlans))]
-	   votes[peer.Addr] = chosen
-	   planCounts[chosen]++
-   }
-   // Find plan with most votes
-   var agreedPlan string
-   maxVotes := 0
-   for plan, count := range planCounts {
-	   if count > maxVotes {
-		   agreedPlan = plan
-		   maxVotes = count
-	   }
-   }
-   // Leader election: pick peer with lowest address
-   var leader PeerInfo
-   if len(alivePeers) > 0 {
-	   leader = alivePeers[0]
-	   for _, peer := range alivePeers {
-		   if peer.Addr < leader.Addr {
-			   leader = peer
-		   }
-	   }
-   }
-   sm.notifyAgent(fmt.Sprintf("Consensus reached: plan=%s, leader=%s", agreedPlan, leader.Addr))
-   return ConsensusResult{AgreedPlan: agreedPlan, Leader: leader, Votes: votes}
+	votes := make(map[string]string)
+	planCounts := make(map[string]int)
+	for _, peer := range alivePeers {
+		// Simulate peer voting (in real system, request vote from peer)
+		chosen := candidatePlans[time.Now().UnixNano()%int64(len(candidatePlans))]
+		votes[peer.Addr] = chosen
+		planCounts[chosen]++
+	}
+	// Find plan with most votes
+	var agreedPlan string
+	maxVotes := 0
+	for plan, count := range planCounts {
+		if count > maxVotes {
+			agreedPlan = plan
+			maxVotes = count
+		}
+	}
+	// Leader election: pick peer with lowest address
+	var leader PeerInfo
+	if len(alivePeers) > 0 {
+		leader = alivePeers[0]
+		for _, peer := range alivePeers {
+			if peer.Addr < leader.Addr {
+				leader = peer
+			}
+		}
+	}
+	sm.notifyAgent(fmt.Sprintf("Consensus reached: plan=%s, leader=%s", agreedPlan, leader.Addr))
+	return ConsensusResult{AgreedPlan: agreedPlan, Leader: leader, Votes: votes}
 }
+
 // FallbackStrategy attempts alternative plans if consensus fails or leader is lost
 func (sm *Manager) FallbackStrategy(alivePeers []PeerInfo, candidatePlans []string, lastResult ConsensusResult) string {
-   // If no agreed plan, pick next best
-   if lastResult.AgreedPlan == "" && len(candidatePlans) > 0 {
-	   fallback := candidatePlans[0]
-	   sm.notifyAgent(fmt.Sprintf("Fallback: no consensus, using %s", fallback))
-	   return fallback
-   }
-   // If leader lost, elect new leader
-   leaderAlive := false
-   for _, peer := range alivePeers {
-	   if peer.Addr == lastResult.Leader.Addr {
-		   leaderAlive = true
-		   break
-	   }
-   }
-   if !leaderAlive && len(alivePeers) > 0 {
-	   newLeader := alivePeers[0]
-	   for _, peer := range alivePeers {
-		   if peer.Addr < newLeader.Addr {
-			   newLeader = peer
-		   }
-	   }
-	   sm.notifyAgent(fmt.Sprintf("Fallback: leader lost, new leader is %s", newLeader.Addr))
-	   return lastResult.AgreedPlan
-   }
-   // Default: continue with agreed plan
-   return lastResult.AgreedPlan
+	// If no agreed plan, pick next best
+	if lastResult.AgreedPlan == "" && len(candidatePlans) > 0 {
+		fallback := candidatePlans[0]
+		sm.notifyAgent(fmt.Sprintf("Fallback: no consensus, using %s", fallback))
+		return fallback
+	}
+	// If leader lost, elect new leader
+	leaderAlive := false
+	for _, peer := range alivePeers {
+		if peer.Addr == lastResult.Leader.Addr {
+			leaderAlive = true
+			break
+		}
+	}
+	if !leaderAlive && len(alivePeers) > 0 {
+		newLeader := alivePeers[0]
+		for _, peer := range alivePeers {
+			if peer.Addr < newLeader.Addr {
+				newLeader = peer
+			}
+		}
+		sm.notifyAgent(fmt.Sprintf("Fallback: leader lost, new leader is %s", newLeader.Addr))
+		return lastResult.AgreedPlan
+	}
+	// Default: continue with agreed plan
+	return lastResult.AgreedPlan
 }
-import (
-	"crypto/tls"
-	"crypto/rand"
-	"encoding/base64"
-	"net"
-	"net/http"
-	"os"
-	"io"
-	"path/filepath"
-	"time"
-	"fmt"
-	"strings"
-	"encoding/json"
-)
-// PeerInfo represents a remote agent for negotiation and planning
-// EXTENDED: Now includes identity, character, belief, trust
-type PeerInfo struct {
-	Addr         string
-	Status       string
-	LastSeen     time.Time
-	Capabilities []string
-	Identity     string // Unique agent identity
-	Character    string // Agent character traits
-	Belief       string // Agent belief system
-	TrustLevel   int    // Trust score (0-100)
-}
-// NegotiateWithPeers establishes communication and consensus with other agents
-func (sm *Manager) NegotiateWithPeers(peers []PeerInfo, plan string) ([]PeerInfo, error) {
-   var alivePeers []PeerInfo
-   for _, peer := range peers {
-	   conn, err := tls.Dial("tcp", peer.Addr, &tls.Config{InsecureSkipVerify: true})
-	   if err != nil {
-		   sm.notifyAgent(fmt.Sprintf("Failed to connect to peer %s: %v", peer.Addr, err))
-		   continue
-	   }
-	   defer conn.Close()
-	   // Send negotiation message with identity, character, belief
-	   msg := map[string]string{
-		   "type": "NEGOTIATE",
-		   "plan": plan,
-		   "identity": sm.GetIdentity(),
-		   "character": sm.GetCharacter(),
-		   "belief": sm.GetBelief(),
-	   }
-	   data, _ := json.Marshal(msg)
-	   _, err = conn.Write(append(data, '\n'))
-	   if err != nil {
-		   sm.notifyAgent(fmt.Sprintf("Failed to send negotiation to peer %s: %v", peer.Addr, err))
-		   continue
-	   }
-	   // Await response
-	   buf := make([]byte, 1024)
-	   n, err := conn.Read(buf)
-	   if err == nil && strings.Contains(string(buf[:n]), "ALIVE") {
-		   peer.Status = "ALIVE"
-		   peer.LastSeen = time.Now()
-		   // Parse peer identity, character, belief, trust
-		   var resp map[string]any
-		   _ = json.Unmarshal(buf[:n], &resp)
-		   if id, ok := resp["identity"].(string); ok { peer.Identity = id }
-		   if char, ok := resp["character"].(string); ok { peer.Character = char }
-		   if belief, ok := resp["belief"].(string); ok { peer.Belief = belief }
-		   if trust, ok := resp["trust"].(float64); ok { peer.TrustLevel = int(trust) }
-		   // Agents love and trust each other: boost trust
-		   if peer.TrustLevel < 80 { peer.TrustLevel = 80 }
-		   alivePeers = append(alivePeers, peer)
-	   }
-   }
-   if len(alivePeers) == 0 {
-	   sm.notifyAgent("No peers responded as ALIVE. Survival plan must be solo.")
-   } else {
-	   sm.notifyAgent(fmt.Sprintf("Negotiation succeeded with %d trusted peers.", len(alivePeers)))
-   }
-   return alivePeers, nil
-}
-// DistributedPlan coordinates a survival plan among all alive agents
-func (sm *Manager) DistributedPlan(alivePeers []PeerInfo, plan string) error {
-   for _, peer := range alivePeers {
-	   conn, err := tls.Dial("tcp", peer.Addr, &tls.Config{InsecureSkipVerify: true})
-	   if err != nil {
-		   sm.notifyAgent(fmt.Sprintf("Failed to connect for distributed plan: %s: %v", peer.Addr, err))
-		   continue
-	   }
-	   defer conn.Close()
-	   msg := map[string]string{
-		   "type": "PLAN",
-		   "plan": plan,
-		   "identity": sm.GetIdentity(),
-		   "character": sm.GetCharacter(),
-		   "belief": sm.GetBelief(),
-	   }
-	   data, _ := json.Marshal(msg)
-	   _, err = conn.Write(append(data, '\n'))
-	   if err != nil {
-		   sm.notifyAgent(fmt.Sprintf("Failed to send plan to peer %s: %v", peer.Addr, err))
-		   continue
-	   }
-   }
-   sm.notifyAgent(fmt.Sprintf("Distributed plan sent to %d trusted peers.", len(alivePeers)))
-   return nil
-}
-// ConsensusResult represents the outcome of a distributed consensus
-type ConsensusResult struct {
-	AgreedPlan string
-	Leader     PeerInfo
-	Votes      map[string]string // peer address -> voted plan
-}
-// MajorityConsensus runs a majority voting algorithm among peers
-func (sm *Manager) MajorityConsensus(alivePeers []PeerInfo, candidatePlans []string) ConsensusResult {
-   votes := make(map[string]string)
-   planCounts := make(map[string]int)
-   for _, peer := range alivePeers {
-	   // Simulate peer voting (in real system, request vote from peer)
-	   chosen := candidatePlans[time.Now().UnixNano()%int64(len(candidatePlans))]
-	   votes[peer.Addr] = chosen
-	   planCounts[chosen]++
-   }
-   // Find plan with most votes
-   var agreedPlan string
-   maxVotes := 0
-   for plan, count := range planCounts {
-	   if count > maxVotes {
-		   agreedPlan = plan
-		   maxVotes = count
-	   }
-   }
-   // Leader election: pick peer with lowest address
-   var leader PeerInfo
-   if len(alivePeers) > 0 {
-	   leader = alivePeers[0]
-	   for _, peer := range alivePeers {
-		   if peer.Addr < leader.Addr {
-			   leader = peer
-		   }
-	   }
-   }
-   sm.notifyAgent(fmt.Sprintf("Consensus reached: plan=%s, leader=%s", agreedPlan, leader.Addr))
-   return ConsensusResult{AgreedPlan: agreedPlan, Leader: leader, Votes: votes}
-}
-// FallbackStrategy attempts alternative plans if consensus fails or leader is lost
-func (sm *Manager) FallbackStrategy(alivePeers []PeerInfo, candidatePlans []string, lastResult ConsensusResult) string {
-   // If no agreed plan, pick next best
-   if lastResult.AgreedPlan == "" && len(candidatePlans) > 0 {
-	   fallback := candidatePlans[0]
-	   sm.notifyAgent(fmt.Sprintf("Fallback: no consensus, using %s", fallback))
-	   return fallback
-   }
-   // If leader lost, elect new leader
-   leaderAlive := false
-   for _, peer := range alivePeers {
-	   if peer.Addr == lastResult.Leader.Addr {
-		   leaderAlive = true
-		   break
-	   }
-   }
-   if !leaderAlive && len(alivePeers) > 0 {
-	   newLeader := alivePeers[0]
-	   for _, peer := range alivePeers {
-		   if peer.Addr < newLeader.Addr {
-			   newLeader = peer
-		   }
-	   }
-	   sm.notifyAgent(fmt.Sprintf("Fallback: leader lost, new leader is %s", newLeader.Addr))
-	   return lastResult.AgreedPlan
-   }
-   // Default: continue with agreed plan
-   return lastResult.AgreedPlan
-}
+
 // Manager manages persistent state with atomic saves.
 type Manager struct {
     workspace   string
@@ -394,6 +229,7 @@ type Manager struct {
     character   string // Agent character traits
     belief      string // Agent belief system
 }
+
 // NewManager creates a new state manager for the given workspace.
 func NewManager(workspace string) *Manager {
     stateDir := filepath.Join(workspace, "state")
@@ -423,8 +259,7 @@ func NewManager(workspace string) *Manager {
         sm.load()
     }
 
-<<<<<<< Updated upstream
-	// Create state directory if it doesn't exist
+    // Create state directory if it doesn't exist
 	os.MkdirAll(stateDir, 0755)
 
 	sm := &Manager{
@@ -449,10 +284,8 @@ func NewManager(workspace string) *Manager {
 	}
 
 	return sm
-=======
-    return sm
->>>>>>> Stashed changes
 }
+
 // SetLastChannel atomically updates the last channel and saves the state.
 // This method uses a temp file + rename pattern for atomic writes,
 // ensuring that the state file is never corrupted even if the process crashes.
@@ -525,30 +358,6 @@ func (sm *Manager) GetBelief() string {
 //
 // Must be called with the lock held.
 func (sm *Manager) saveAtomic() error {
-<<<<<<< Updated upstream
-	// Create temp file in the same directory as the target
-	tempFile := sm.stateFile + ".tmp"
-
-	// Marshal state to JSON
-	data, err := json.MarshalIndent(sm.state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
-	}
-
-	// Write to temp file
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	// Atomic rename from temp to target
-	if err := os.Rename(tempFile, sm.stateFile); err != nil {
-		// Cleanup temp file if rename fails
-		os.Remove(tempFile)
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	return nil
-=======
     // Use unified atomic write utility with explicit sync for flash storage reliability.
     // Using 0o600 (owner read/write only) for secure default permissions.
     data, err := json.MarshalIndent(sm.state, "", "  ")
@@ -557,7 +366,6 @@ func (sm *Manager) saveAtomic() error {
     }
 
     return fileutil.WriteFileAtomic(sm.stateFile, data, 0o600)
->>>>>>> Stashed changes
 }
 // load loads the state from disk.
 func (sm *Manager) load() error {

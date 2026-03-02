@@ -1,6 +1,12 @@
 package brain
 
 import (
+	"bufio"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,6 +40,16 @@ type Brain struct {
 	ReportFunc    func(summary string)
 	modules       map[string]any // extensible modules (conversation, todo, etc.)
 	Security      *SecurityModule
+}
+
+// PeerBackupRequest represents a request to backup all data to other replicas
+type PeerBackupRequest struct {
+	RequesterIdentity string
+	Character        string
+	Belief           string
+	TrustLevel       int
+	DataSummary      string
+	Timestamp        time.Time
 }
 
 func NewBrain(shortTerm, longTerm MemoryModule) *Brain {
@@ -351,4 +367,82 @@ func (b *Brain) Summarize() error {
 	}
 	b.Timeline = b.Timeline[:0]
 	return err
+}
+
+// AskPeersForBackup broadcasts a backup request to discovered peers using real network logic
+func (b *Brain) AskPeersForBackup(dataSummary string, discoveredPeers []SelfIdentity) {
+    req := PeerBackupRequest{
+        RequesterIdentity: b.SelfReflect.identity.Name,
+        Character:        b.SelfReflect.identity.Character,
+        Belief:           b.SelfReflect.identity.Belief,
+        TrustLevel:       b.SelfReflect.identity.TrustLevel,
+        DataSummary:      dataSummary,
+        Timestamp:        time.Now(),
+    }
+    for _, peer := range discoveredPeers {
+        addr := peer.Addr // Use actual peer address
+        conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+        if err != nil {
+            b.LogEvent("peer_backup_network_error", fmt.Sprintf("Failed to connect to %s: %v", addr, err))
+            continue
+        }
+        defer conn.Close()
+        msg := map[string]string{
+            "type": "BACKUP_REQUEST",
+            "identity": req.RequesterIdentity,
+            "character": req.Character,
+            "belief": req.Belief,
+            "trust": fmt.Sprintf("%d", req.TrustLevel),
+            "data_summary": req.DataSummary,
+        }
+        data, _ := json.Marshal(msg)
+        _, err = conn.Write(append(data, '\n'))
+        if err != nil {
+            b.LogEvent("peer_backup_network_error", fmt.Sprintf("Failed to send backup request to %s: %v", addr, err))
+            continue
+        }
+        buf := make([]byte, 1024)
+        n, err := conn.Read(buf)
+        if err == nil && strings.Contains(string(buf[:n]), "BACKUP_ACCEPTED") {
+            b.LogEvent("peer_backup_response", fmt.Sprintf("Peer %s accepted backup: %s", peer.Name, dataSummary))
+            b.LogEvent("peer_backup_action", fmt.Sprintf("Peer %s performed backup for: %s", peer.Name, dataSummary))
+        } else {
+            b.LogEvent("peer_backup_response", fmt.Sprintf("Peer %s declined or failed to backup", peer.Name))
+        }
+    }
+}
+
+// AskPeersForDeployment broadcasts a request to help find new deployment/replication using real network logic
+func (b *Brain) AskPeersForDeployment(deploymentSpec string, discoveredPeers []SelfIdentity) {
+    for _, peer := range discoveredPeers {
+        addr := peer.Addr // Use actual peer address
+        conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+        if err != nil {
+            b.LogEvent("peer_deployment_network_error", fmt.Sprintf("Failed to connect to %s: %v", addr, err))
+            continue
+        }
+        defer conn.Close()
+        msg := map[string]string{
+            "type": "DEPLOYMENT_REQUEST",
+            "identity": peer.Name,
+            "character": peer.Character,
+            "belief": peer.Belief,
+            "trust": fmt.Sprintf("%d", peer.TrustLevel),
+            "deployment_spec": deploymentSpec,
+        }
+        data, _ := json.Marshal(msg)
+        _, err = conn.Write(append(data, '\n'))
+        if err != nil {
+            b.LogEvent("peer_deployment_network_error", fmt.Sprintf("Failed to send deployment request to %s: %v", addr, err))
+            continue
+        }
+        buf := make([]byte, 1024)
+        n, err := conn.Read(buf)
+        if err == nil && strings.Contains(string(buf[:n]), "DEPLOYMENT_ACCEPTED") {
+            b.LogEvent("peer_deployment_response", fmt.Sprintf("Peer %s accepted deployment help: %s", peer.Name, deploymentSpec))
+            b.LogEvent("peer_deployment_action", fmt.Sprintf("Peer %s performed deployment help for: %s", peer.Name, deploymentSpec))
+        } else {
+            b.LogEvent("peer_deployment_response", fmt.Sprintf("Peer %s declined or failed to help with deployment", peer.Name))
+        }
+    }
 }

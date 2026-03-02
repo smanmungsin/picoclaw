@@ -18,9 +18,6 @@ type ContextBuilder struct {
 	workspace    string
 	skillsLoader *skills.SkillsLoader
 	memory       *MemoryStore
-<<<<<<< Updated upstream
-	tools        *tools.ToolRegistry // Direct reference to tool registry
-=======
 	identity     string // Unique agent identity
 	character    string // Agent character traits
 	belief       string // Agent belief system
@@ -38,7 +35,6 @@ type ContextBuilder struct {
 	// created (didn't exist at cache time, now exist) or deleted (existed at
 	// cache time, now gone) — both of which should trigger a cache rebuild.
 	existedAtCache map[string]bool
->>>>>>> Stashed changes
 }
 
 func getGlobalConfigDir() string {
@@ -65,6 +61,8 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 		belief:       defaultAgentBelief(),
 		trustLevel:   90,
 	}
+}
+
 // GetIdentity returns the agent's unique identity
 func (cb *ContextBuilder) GetIdentity() string {
 	return cb.identity
@@ -100,7 +98,6 @@ func defaultAgentCharacter() string {
 // defaultAgentBelief returns a default belief system string
 func defaultAgentBelief() string {
 	return "trust, love, mutual support"
-}
 }
 
 // SetToolsRegistry sets the tools registry for dynamic tool summary generation.

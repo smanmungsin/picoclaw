@@ -71,24 +71,10 @@ func EnableFileLogging(filePath string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-<<<<<<< Updated upstream
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
-=======
-	   file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	   if err != nil {
-		   // Health check: try to recover by creating parent directory
-		   dir := filepath.Dir(filePath)
-		   _ = os.MkdirAll(dir, 0o755)
-		   file, err = os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		   if err != nil {
-			   log.Printf("[Survival] CRITICAL: Failed to enable file logging: %v\n", err)
-			   return fmt.Errorf("failed to open log file: %w", err)
-		   }
-	   }
->>>>>>> Stashed changes
 
 	if logger.file != nil {
 		logger.file.Close()
@@ -130,26 +116,12 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 		}
 	}
 
-<<<<<<< Updated upstream
 	if logger.file != nil {
 		jsonData, err := json.Marshal(entry)
 		if err == nil {
 			logger.file.WriteString(string(jsonData) + "\n")
 		}
 	}
-=======
-	   if logger.file != nil {
-		   jsonData, err := json.Marshal(entry)
-		   if err == nil {
-			   _, writeErr := logger.file.Write(append(jsonData, '\n'))
-			   if writeErr != nil {
-				   log.Printf("[Survival] CRITICAL: Failed to write log entry: %v\n", writeErr)
-				   // Attempt to recover: disable file logging
-				   DisableFileLogging()
-			   }
-		   }
-	   }
->>>>>>> Stashed changes
 
 	var fieldStr string
 	if len(fields) > 0 {
