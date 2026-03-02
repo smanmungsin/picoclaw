@@ -23,6 +23,18 @@ import (
 	skills "github.com/sipeed/picoclaw/pkg/skills"
 )
 
+// periodicSelfLearning triggers self-reflection and improvement periodically
+func (b *Brain) periodicSelfLearning() {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		if b.SelfReflect != nil {
+			b.SelfReflect.Analyze()
+			b.LogEvent("self_learning", "Self-reflection and improvement performed")
+		}
+	}
+}
+
 // BadgerMemory implements persistent memory using BadgerDB
 type BadgerMemory struct {
 	db *badger.DB
@@ -468,6 +480,7 @@ type Brain struct {
 	peerReputation         map[string]int // Peer reputation scores
 	trustThreshold         int            // Minimum trust level for peer
 	selfReplicationEnabled bool           // Enable nightly self-replication
+	selfLearningEnabled    bool           // Enable self learning by default
 }
 
 // PeerBackupRequest represents a request to backup all data to other replicas
@@ -503,18 +516,23 @@ func NewBrain(shortTerm, longTerm MemoryModule) *Brain {
 		fmt.Printf("[Survival] Missing critical tools: %v. Attempted auto-install.\n", missingTools)
 	}
 	b := &Brain{
-		ShortTerm:      shortTerm,
-		LongTerm:       longTerm,
-		Timeline:       make([]Event, 0),
-		mu:             sync.RWMutex{},
-		SelfReflect:    nil,
-		reflectEvery:   10,
-		eventCount:     0,
-		reflectOn:      make(map[string]bool),
-		ReportFunc:     nil,
-		modules:        make(map[string]any),
-		Security:       nil,
-		eventStorePath: "event_store.json",
+		ShortTerm:           shortTerm,
+		LongTerm:            longTerm,
+		Timeline:            make([]Event, 0),
+		mu:                  sync.RWMutex{},
+		SelfReflect:         NewSelfReflectionModule(),
+		selfLearningEnabled: true,
+		reflectEvery:        10,
+		eventCount:          0,
+		reflectOn:           make(map[string]bool),
+		ReportFunc:          nil,
+		modules:             make(map[string]any),
+		Security:            nil,
+		eventStorePath:      "event_store.json",
+	}
+	// Start periodic self learning (reflection)
+	if b.selfLearningEnabled {
+		go b.periodicSelfLearning()
 	}
 	b.RecoverEventStore()
 	b.knownPeers = []SelfIdentity{} // Initialize known peers
