@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"fmt"
+
 	"github.com/sipeed/picoclaw/pkg/brain"
 )
 
@@ -11,41 +13,48 @@ type AgentBrain struct {
 }
 
 func NewAgentBrain() *AgentBrain {
-   shortTerm := brain.NewInMemoryMemory()
-   longTerm, err := brain.NewBadgerMemory("./brain_data")
-   if err != nil {
-	   fmt.Println("[Brain] Warning: Falling back to in-memory long-term memory:", err)
-	   longTerm = shortTerm
-   }
-   b := brain.NewBrain(shortTerm, longTerm)
-   // Wire up reporting to log output
-   b.SetReportFunc(func(summary string) {
-	   fmt.Println(summary) // Print to console/log for both user and agent
-   })
+	shortTerm := brain.NewInMemoryMemory()
+	longTerm, err := brain.NewBadgerMemory("./brain_data")
+	if err != nil {
+		fmt.Println("[Brain] Warning: Falling back to in-memory long-term memory:", err)
+		longTerm = shortTerm
+	}
+	b := brain.NewBrain(shortTerm, longTerm)
+	// Wire up reporting to log output
+	b.SetReportFunc(func(summary string) {
+		fmt.Println(summary) // Print to console/log for both user and agent
+	})
 
-   // Connect conversation module for adaptive learning
-   conv := brain.NewConversationModule()
-   conv.OnAdd = func(msg string) {
-	   defer func() {
-		   if r := recover(); r != nil {
-			   fmt.Println("[Brain] Conversation callback error:", r)
-		   }
-	   }()
-	   b.LogEvent("conversation_message", msg)
-	   // Record in self-reflection
-	   if b.SelfReflect != nil {
-		   b.SelfReflect.RecordEvent("conversation_message", "neutral", []string{"conversation"})
-	   }
-	   if len(conv.GetHistory(20))%10 == 0 { // Every 10 messages
-		   go b.Summarize()
-	   }
-   }
-   // Optionally expose conv as a field or module
-   return &AgentBrain{Brain: b}
+	// Connect persistent conversation module for adaptive learning
+	conv, err := brain.NewPersistentConversationModule("./conversation_data", "agent_conversation")
+	if err != nil {
+		fmt.Println("[Brain] Warning: Falling back to in-memory conversation module:", err)
+		conv = brain.NewConversationModule()
+	}
+	conv.OnAdd = func(msg string) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("[Brain] Conversation callback error:", r)
+			}
+		}()
+		b.LogEvent("conversation_message", msg)
+		// Record in self-reflection
+		if b.SelfReflect != nil {
+			b.SelfReflect.RecordEvent("conversation_message", "neutral", []string{"conversation"})
+		}
+		if len(conv.GetHistory(20))%10 == 0 { // Every 10 messages
+			go b.Summarize()
+		}
+	}
+	// Usage example: add and get history
+	conv.AddMessage("Hello, persistent world!")
+	fmt.Println("Conversation history:", conv.GetHistory(10))
+	// Optionally expose conv as a field or module
+	return &AgentBrain{Brain: b}
 }
 
 // Example: Log an event to the brain
-defaultAgentBrain *AgentBrain
+var defaultAgentBrain *AgentBrain
 
 func GetAgentBrain() *AgentBrain {
 	if defaultAgentBrain == nil {

@@ -1,10 +1,12 @@
 package brain
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // SelfReflectionModule analyzes memory to improve suggestions and adapt to user habits
 // This is a stub for future expansion
-
 
 type ReflectionEvent struct {
 	Timestamp   time.Time
@@ -20,14 +22,15 @@ type ImprovementPlan struct {
 }
 
 type SelfIdentity struct {
-	Name        string
-	Strengths   []string
-	Weaknesses  []string
-	Values      []string
-	Mindset     string
-	Character   string // Agent character traits
-	Belief      string // Agent belief system
-	TrustLevel  int    // Trust score (0-100)
+	Name       string
+	Addr       string // Peer address for network operations
+	Strengths  []string
+	Weaknesses []string
+	Values     []string
+	Mindset    string
+	Character  string // Agent character traits
+	Belief     string // Agent belief system
+	TrustLevel int    // Trust score (0-100)
 }
 
 type SelfReflectionModule struct {
@@ -37,17 +40,16 @@ type SelfReflectionModule struct {
 	improvementPlan ImprovementPlan
 }
 
-
 func NewSelfReflectionModule() *SelfReflectionModule {
 	return &SelfReflectionModule{
 		identity: SelfIdentity{
-			Name:      "Agent",
-			Strengths: []string{"adaptability", "learning"},
+			Name:       "Agent",
+			Strengths:  []string{"adaptability", "learning"},
 			Weaknesses: []string{"impatience"},
-			Values:    []string{"growth", "helpfulness"},
-			Mindset:   "growth",
-			Character: "curious, collaborative, loving",
-			Belief:    "trust, love, mutual support",
+			Values:     []string{"growth", "helpfulness"},
+			Mindset:    "growth",
+			Character:  "curious, collaborative, loving",
+			Belief:     "trust, love, mutual support",
 			TrustLevel: 90,
 		},
 		improvementPlan: ImprovementPlan{
@@ -57,6 +59,8 @@ func NewSelfReflectionModule() *SelfReflectionModule {
 		},
 		history: []ReflectionEvent{},
 	}
+}
+
 // NegotiateWithPeers establishes communication and consensus with other brains
 func (m *SelfReflectionModule) NegotiateWithPeers(peers []SelfIdentity, plan string) ([]SelfIdentity, error) {
 	var alivePeers []SelfIdentity
@@ -76,8 +80,6 @@ func (m *SelfReflectionModule) DistributedPlan(alivePeers []SelfIdentity, plan s
 	}
 	return nil
 }
-}
-
 
 // Analyze reviews history, updates improvement plan, and adapts identity
 func (m *SelfReflectionModule) Analyze() {

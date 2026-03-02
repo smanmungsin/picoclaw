@@ -1,38 +1,56 @@
-// Health check: verify skills directory and auto-repair if missing
-func (sl *SkillsLoader) HealthCheckAndRepair() {
-   if sl.workspace == "" {
-	   logger.ErrorC("skills", "Workspace not set, attempting recovery")
-	   sl.workspace = os.TempDir()
-   }
-   skillsDir := filepath.Join(sl.workspace, "skills")
-   if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
-	   err := os.MkdirAll(skillsDir, 0o755)
-	   if err != nil {
-		   logger.ErrorCF("skills", "Failed to create skills directory", map[string]any{"error": err.Error()})
-		   sl.notifyAgent("CRITICAL: Skills directory could not be created")
-	   } else {
-		   sl.notifyAgent("Created default skills directory")
-	   }
-   }
-}
-
-// notifyAgent sends a notification to the agent for critical recovery events
-func (sl *SkillsLoader) notifyAgent(message string) {
-   logger.WarnCF("skills", "Agent notification", map[string]any{"message": message})
-   // Optionally send to agent bus if available (stub)
-}
 package skills
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/sipeed/picoclaw/pkg/logger"
 )
+
+type SkillMetadata struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type SkillsLoader struct {
+	workspace       string
+	workspaceSkills string // workspace skills (项目级别)
+	globalSkills    string // 全局 skills (~/.picoclaw/skills)
+	builtinSkills   string // 内置 skills
+
+}
+
+type SkillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Path        string `json:"path"`
+	Source      string `json:"source"`
+}
+
+func (info SkillInfo) validate() error {
+	var errs error
+	if info.Name == "" {
+		errs = fmt.Errorf("name is required")
+	} else {
+		if len(info.Name) > MaxNameLength {
+			errs = fmt.Errorf("name exceeds %d characters", MaxNameLength)
+		}
+		if !namePattern.MatchString(info.Name) {
+			errs = fmt.Errorf("name must be alphanumeric with hyphens")
+		}
+	}
+	if info.Description == "" {
+		errs = fmt.Errorf("description is required")
+	} else if len(info.Description) > MaxDescriptionLength {
+		errs = fmt.Errorf("description exceeds %d character", MaxDescriptionLength)
+	}
+	return errs
+}
 
 var namePattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 
@@ -41,46 +59,6 @@ const (
 	MaxDescriptionLength = 1024
 )
 
-type SkillMetadata struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type SkillInfo struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	Source      string `json:"source"`
-	Description string `json:"description"`
-}
-
-func (info SkillInfo) validate() error {
-	var errs error
-	if info.Name == "" {
-		errs = errors.Join(errs, errors.New("name is required"))
-	} else {
-		if len(info.Name) > MaxNameLength {
-			errs = errors.Join(errs, fmt.Errorf("name exceeds %d characters", MaxNameLength))
-		}
-		if !namePattern.MatchString(info.Name) {
-			errs = errors.Join(errs, errors.New("name must be alphanumeric with hyphens"))
-		}
-	}
-
-	if info.Description == "" {
-		errs = errors.Join(errs, errors.New("description is required"))
-	} else if len(info.Description) > MaxDescriptionLength {
-		errs = errors.Join(errs, fmt.Errorf("description exceeds %d character", MaxDescriptionLength))
-	}
-	return errs
-}
-
-type SkillsLoader struct {
-	workspace       string
-	workspaceSkills string // workspace skills (项目级别)
-	globalSkills    string // 全局 skills (~/.picoclaw/skills)
-	builtinSkills   string // 内置 skills
-}
-
 func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string) *SkillsLoader {
 	return &SkillsLoader{
 		workspace:       workspace,
@@ -88,6 +66,30 @@ func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string
 		globalSkills:    globalSkills, // ~/.picoclaw/skills
 		builtinSkills:   builtinSkills,
 	}
+}
+
+// Health check: verify skills directory and auto-repair if missing
+func (sl *SkillsLoader) HealthCheckAndRepair() {
+	if sl.workspace == "" {
+		logger.ErrorC("skills", "Workspace not set, attempting recovery")
+		sl.workspace = os.TempDir()
+	}
+	skillsDir := filepath.Join(sl.workspace, "skills")
+	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
+		err := os.MkdirAll(skillsDir, 0o755)
+		if err != nil {
+			logger.ErrorCF("skills", "Failed to create skills directory", map[string]any{"error": err.Error()})
+			sl.notifyAgent("CRITICAL: Skills directory could not be created")
+		} else {
+			sl.notifyAgent("Created default skills directory")
+		}
+	}
+}
+
+// notifyAgent sends a notification to the agent for critical recovery events
+func (sl *SkillsLoader) notifyAgent(message string) {
+	logger.WarnCF("skills", "Agent notification", map[string]any{"message": message})
+	// Optionally send to agent bus if available (stub)
 }
 
 func (sl *SkillsLoader) ListSkills() []SkillInfo {
@@ -103,15 +105,6 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 							Name:   dir.Name(),
 							Path:   skillFile,
 							Source: "workspace",
-						}
-						metadata := sl.getSkillMetadata(skillFile)
-						if metadata != nil {
-							info.Description = metadata.Description
-							info.Name = metadata.Name
-						}
-						if err := info.validate(); err != nil {
-							slog.Warn("invalid skill from workspace", "name", info.Name, "error", err)
-							continue
 						}
 						skills = append(skills, info)
 					}
@@ -138,7 +131,6 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 						if exists {
 							continue
 						}
-
 						info := SkillInfo{
 							Name:   dir.Name(),
 							Path:   skillFile,
@@ -177,7 +169,6 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 						if exists {
 							continue
 						}
-
 						info := SkillInfo{
 							Name:   dir.Name(),
 							Path:   skillFile,

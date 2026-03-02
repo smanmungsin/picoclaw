@@ -1,35 +1,15 @@
-// Health check: verify session key file and auto-repair if missing
-func HealthCheckAndRepairSessionKey(workspace string) {
-   if workspace == "" {
-	   logger.ErrorC("routing", "Workspace not set, attempting recovery")
-	   workspace = os.TempDir()
-   }
-   keyFile := filepath.Join(workspace, "session.key")
-   if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-	   f, err := os.Create(keyFile)
-	   if err != nil {
-		   logger.ErrorCF("routing", "Failed to create session key file", map[string]any{"error": err.Error()})
-		   notifyAgent("CRITICAL: Session key file could not be created")
-	   } else {
-		   f.Close()
-		   notifyAgent("Created default session key file")
-	   }
-   }
-}
-
-// notifyAgent sends a notification to the agent for critical recovery events
-func notifyAgent(message string) {
-   logger.WarnCF("routing", "Agent notification", map[string]any{"message": message})
-   // Optionally send to agent bus if available (stub)
-}
 package routing
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
-// DMScope controls DM session isolation granularity.
+// DMScope defines the scope for direct message session keys
 type DMScope string
 
 const (
@@ -37,7 +17,43 @@ const (
 	DMScopePerPeer               DMScope = "per-peer"
 	DMScopePerChannelPeer        DMScope = "per-channel-peer"
 	DMScopePerAccountChannelPeer DMScope = "per-account-channel-peer"
+	DefaultMainKey                       = "main"
 )
+
+// NormalizeAgentID normalizes an agent ID string
+func NormalizeAgentID(agentID string) string {
+	return strings.ToLower(strings.TrimSpace(agentID))
+}
+
+// NormalizeAccountID normalizes an account ID string
+func NormalizeAccountID(accountID string) string {
+	return strings.ToLower(strings.TrimSpace(accountID))
+}
+
+// Health check: verify session key file and auto-repair if missing
+func HealthCheckAndRepairSessionKey(workspace string) {
+	if workspace == "" {
+		logger.ErrorC("routing", "Workspace not set, attempting recovery")
+		workspace = os.TempDir()
+	}
+	keyFile := filepath.Join(workspace, "session.key")
+	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
+		f, err := os.Create(keyFile)
+		if err != nil {
+			logger.ErrorCF("routing", "Failed to create session key file", map[string]any{"error": err.Error()})
+			notifyAgent("CRITICAL: Session key file could not be created")
+		} else {
+			f.Close()
+			notifyAgent("Created default session key file")
+		}
+	}
+}
+
+// notifyAgent sends a notification to the agent for critical recovery events
+func notifyAgent(message string) {
+	logger.WarnCF("routing", "Agent notification", map[string]any{"message": message})
+	// Optionally send to agent bus if available (stub)
+}
 
 // RoutePeer represents a chat peer with kind and ID.
 type RoutePeer struct {

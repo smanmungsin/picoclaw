@@ -1,6 +1,8 @@
 package state
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,15 +10,27 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-	"crypto/rand"
-	"encoding/base64"
+
 	"github.com/sipeed/picoclaw/pkg/fileutil"
 )
 
+// notifyAgent sends a notification to the agent for consensus events
+func (sm *Manager) notifyAgent(message string) {
+	log.Printf("[AGENT] %s", message)
+}
+
+// PeerInfo represents information about a peer in the network
+type PeerInfo struct {
+	Addr         string
+	Status       string
+	LastSeen     time.Time
+	Capabilities []string
+}
+
 // State represents the persistent state for a workspace.
 type State struct {
-	LastChannel string `json:"last_channel,omitempty"`
-	LastChatID  string `json:"last_chat_id,omitempty"`
+	LastChannel string    `json:"last_channel,omitempty"`
+	LastChatID  string    `json:"last_chat_id,omitempty"`
 	Timestamp   time.Time `json:"timestamp"`
 }
 
@@ -44,7 +58,9 @@ func (reg *PersistentPeerRegistry) RemovePeer(addr string) {
 
 func (reg *PersistentPeerRegistry) Load() {
 	f, err := os.Open(reg.File)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	defer f.Close()
 	dec := json.NewDecoder(f)
 	_ = dec.Decode(&reg.Peers)
@@ -52,7 +68,9 @@ func (reg *PersistentPeerRegistry) Load() {
 
 func (reg *PersistentPeerRegistry) Save() {
 	f, err := os.OpenFile(reg.File, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	_ = enc.Encode(reg.Peers)
@@ -105,13 +123,13 @@ func (reg *PersistentPeerRegistry) CivilizationReady(minPeers int) bool {
 func (sm *Manager) PaxosConsensus(alivePeers []PeerInfo, proposal string) ConsensusResult {
 	// Phase 1: Prepare
 	promises := 0
-	for _, peer := range alivePeers {
+	for range alivePeers {
 		// Simulate promise (in real system, send PREPARE message)
 		promises++
 	}
 	// Phase 2: Accept
 	accepts := 0
-	for _, peer := range alivePeers {
+	for range alivePeers {
 		// Simulate accept (in real system, send ACCEPT message)
 		accepts++
 	}
@@ -129,15 +147,15 @@ func (sm *Manager) RaftConsensus(alivePeers []PeerInfo, logEntry string) Consens
 	var leader PeerInfo
 	if len(alivePeers) > 0 {
 		leader = alivePeers[0]
-		for _, peer := range alivePeers {
-			if peer.Addr < leader.Addr {
-				leader = peer
+		for _, p := range alivePeers {
+			if p.Addr < leader.Addr {
+				leader = p
 			}
 		}
 	}
 	// Log replication: send log entry to all peers
 	replicated := 0
-	for _, peer := range alivePeers {
+	for range alivePeers {
 		// Simulate log replication (in real system, send APPEND message)
 		replicated++
 	}
@@ -160,10 +178,10 @@ type ConsensusResult struct {
 func (sm *Manager) MajorityConsensus(alivePeers []PeerInfo, candidatePlans []string) ConsensusResult {
 	votes := make(map[string]string)
 	planCounts := make(map[string]int)
-	for _, peer := range alivePeers {
+	for _, p := range alivePeers {
 		// Simulate peer voting (in real system, request vote from peer)
 		chosen := candidatePlans[time.Now().UnixNano()%int64(len(candidatePlans))]
-		votes[peer.Addr] = chosen
+		votes[p.Addr] = chosen
 		planCounts[chosen]++
 	}
 	// Find plan with most votes
@@ -179,9 +197,9 @@ func (sm *Manager) MajorityConsensus(alivePeers []PeerInfo, candidatePlans []str
 	var leader PeerInfo
 	if len(alivePeers) > 0 {
 		leader = alivePeers[0]
-		for _, peer := range alivePeers {
-			if peer.Addr < leader.Addr {
-				leader = peer
+		for _, p := range alivePeers {
+			if p.Addr < leader.Addr {
+				leader = p
 			}
 		}
 	}
@@ -199,17 +217,17 @@ func (sm *Manager) FallbackStrategy(alivePeers []PeerInfo, candidatePlans []stri
 	}
 	// If leader lost, elect new leader
 	leaderAlive := false
-	for _, peer := range alivePeers {
-		if peer.Addr == lastResult.Leader.Addr {
+	for _, p := range alivePeers {
+		if p.Addr == lastResult.Leader.Addr {
 			leaderAlive = true
 			break
 		}
 	}
 	if !leaderAlive && len(alivePeers) > 0 {
 		newLeader := alivePeers[0]
-		for _, peer := range alivePeers {
-			if peer.Addr < newLeader.Addr {
-				newLeader = peer
+		for _, p := range alivePeers {
+			if p.Addr < newLeader.Addr {
+				newLeader = p
 			}
 		}
 		sm.notifyAgent(fmt.Sprintf("Fallback: leader lost, new leader is %s", newLeader.Addr))
@@ -221,53 +239,29 @@ func (sm *Manager) FallbackStrategy(alivePeers []PeerInfo, candidatePlans []stri
 
 // Manager manages persistent state with atomic saves.
 type Manager struct {
-    workspace   string
-    state       *State
-    mu          sync.RWMutex
-    stateFile   string
-    identity    string // Unique agent identity
-    character   string // Agent character traits
-    belief      string // Agent belief system
+	workspace string
+	state     *State
+	mu        sync.RWMutex
+	stateFile string
+	identity  string // Unique agent identity
+	character string // Agent character traits
+	belief    string // Agent belief system
 }
 
 // NewManager creates a new state manager for the given workspace.
 func NewManager(workspace string) *Manager {
-    stateDir := filepath.Join(workspace, "state")
-    stateFile := filepath.Join(stateDir, "state.json")
-    oldStateFile := filepath.Join(workspace, "state.json")
-    os.MkdirAll(stateDir, 0o755)
-    sm := &Manager{
-        workspace: workspace,
-        stateFile: stateFile,
-        state:     &State{},
-        identity:  generateAgentIdentity(),
-        character: defaultAgentCharacter(),
-        belief:    defaultAgentBelief(),
-    }
-    // Try to load from new location first
-    if _, err := os.Stat(stateFile); os.IsNotExist(err) {
-        // New file doesn't exist, try migrating from old location
-        if data, err := os.ReadFile(oldStateFile); err == nil {
-            if err := json.Unmarshal(data, sm.state); err == nil {
-                // Migrate to new location
-                sm.saveAtomic()
-                log.Printf("[INFO] state: migrated state from %s to %s", oldStateFile, stateFile)
-            }
-        }
-    } else {
-        // Load from new location
-        sm.load()
-    }
-
-    // Create state directory if it doesn't exist
-	os.MkdirAll(stateDir, 0755)
-
+	stateDir := filepath.Join(workspace, "state")
+	stateFile := filepath.Join(stateDir, "state.json")
+	oldStateFile := filepath.Join(workspace, "state.json")
+	os.MkdirAll(stateDir, 0o755)
 	sm := &Manager{
 		workspace: workspace,
 		stateFile: stateFile,
 		state:     &State{},
+		identity:  generateAgentIdentity(),
+		character: defaultAgentCharacter(),
+		belief:    defaultAgentBelief(),
 	}
-
 	// Try to load from new location first
 	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
 		// New file doesn't exist, try migrating from old location
@@ -290,66 +284,74 @@ func NewManager(workspace string) *Manager {
 // This method uses a temp file + rename pattern for atomic writes,
 // ensuring that the state file is never corrupted even if the process crashes.
 func (sm *Manager) SetLastChannel(channel string) error {
-    sm.mu.Lock()
-    defer sm.mu.Unlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-    // Update state
-    sm.state.LastChannel = channel
-    sm.state.Timestamp = time.Now()
+	// Update state
+	sm.state.LastChannel = channel
+	sm.state.Timestamp = time.Now()
 
-    // Atomic save using temp file + rename
-    if err := sm.saveAtomic(); err != nil {
-        return fmt.Errorf("failed to save state atomically: %w", err)
-    }
+	// Atomic save using temp file + rename
+	if err := sm.saveAtomic(); err != nil {
+		return fmt.Errorf("failed to save state atomically: %w", err)
+	}
 
-    return nil
+	return nil
 }
+
 // SetLastChatID atomically updates the last chat ID and saves the state.
 func (sm *Manager) SetLastChatID(chatID string) error {
-    sm.mu.Lock()
-    defer sm.mu.Unlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-    // Update state
-    sm.state.LastChatID = chatID
-    sm.state.Timestamp = time.Now()
+	// Update state
+	sm.state.LastChatID = chatID
+	sm.state.Timestamp = time.Now()
 
-    // Atomic save using temp file + rename
-    if err := sm.saveAtomic(); err != nil {
-        return fmt.Errorf("failed to save state atomically: %w", err)
-    }
+	// Atomic save using temp file + rename
+	if err := sm.saveAtomic(); err != nil {
+		return fmt.Errorf("failed to save state atomically: %w", err)
+	}
 
-    return nil
+	return nil
 }
+
 // GetLastChannel returns the last channel from the state.
 func (sm *Manager) GetLastChannel() string {
-    sm.mu.RLock()
-    defer sm.mu.RUnlock()
-    return sm.state.LastChannel
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.state.LastChannel
 }
+
 // GetLastChatID returns the last chat ID from the state.
 func (sm *Manager) GetLastChatID() string {
-    sm.mu.RLock()
-    defer sm.mu.RUnlock()
-    return sm.state.LastChatID
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.state.LastChatID
 }
+
 // GetTimestamp returns the timestamp of the last state update.
 func (sm *Manager) GetTimestamp() time.Time {
-    sm.mu.RLock()
-    defer sm.mu.RUnlock()
-    return sm.state.Timestamp
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.state.Timestamp
 }
+
 // GetIdentity returns the agent's unique identity
 func (sm *Manager) GetIdentity() string {
-    return sm.identity
+	return sm.identity
 }
+
 // GetCharacter returns the agent's character traits
 func (sm *Manager) GetCharacter() string {
-    return sm.character
+	return sm.character
 }
+
 // GetBelief returns the agent's belief system
 func (sm *Manager) GetBelief() string {
-    return sm.belief
+	return sm.belief
 }
+
 // saveAtomic performs an atomic save using temp file + rename.
 // This ensures that the state file is never corrupted:
 // 1. Write to a temp file
@@ -358,43 +360,47 @@ func (sm *Manager) GetBelief() string {
 //
 // Must be called with the lock held.
 func (sm *Manager) saveAtomic() error {
-    // Use unified atomic write utility with explicit sync for flash storage reliability.
-    // Using 0o600 (owner read/write only) for secure default permissions.
-    data, err := json.MarshalIndent(sm.state, "", "  ")
-    if err != nil {
-        return fmt.Errorf("failed to marshal state: %w", err)
-    }
+	// Use unified atomic write utility with explicit sync for flash storage reliability.
+	// Using 0o600 (owner read/write only) for secure default permissions.
+	data, err := json.MarshalIndent(sm.state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal state: %w", err)
+	}
 
-    return fileutil.WriteFileAtomic(sm.stateFile, data, 0o600)
+	return fileutil.WriteFileAtomic(sm.stateFile, data, 0o600)
 }
+
 // load loads the state from disk.
 func (sm *Manager) load() error {
-    data, err := os.ReadFile(sm.stateFile)
-    if err != nil {
-        // File doesn't exist yet, that's OK
-        if os.IsNotExist(err) {
-            return nil
-        }
-        return fmt.Errorf("failed to read state file: %w", err)
-    }
+	data, err := os.ReadFile(sm.stateFile)
+	if err != nil {
+		// File doesn't exist yet, that's OK
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read state file: %w", err)
+	}
 
-    if err := json.Unmarshal(data, sm.state); err != nil {
-        return fmt.Errorf("failed to unmarshal state: %w", err)
-    }
+	if err := json.Unmarshal(data, sm.state); err != nil {
+		return fmt.Errorf("failed to unmarshal state: %w", err)
+	}
 
-    return nil
+	return nil
 }
+
 // generateAgentIdentity creates a unique agent identity string
 func generateAgentIdentity() string {
-    b := make([]byte, 16)
-    _, _ = rand.Read(b)
-    return base64.StdEncoding.EncodeToString(b)
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
 }
+
 // defaultAgentCharacter returns a default character trait string
 func defaultAgentCharacter() string {
-    return "curious, collaborative, loving"
+	return "curious, collaborative, loving"
 }
+
 // defaultAgentBelief returns a default belief system string
 func defaultAgentBelief() string {
-    return "trust, love, mutual support"
+	return "trust, love, mutual support"
 }

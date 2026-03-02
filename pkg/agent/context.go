@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -35,6 +36,9 @@ type ContextBuilder struct {
 	// created (didn't exist at cache time, now exist) or deleted (existed at
 	// cache time, now gone) — both of which should trigger a cache rebuild.
 	existedAtCache map[string]bool
+
+	// Registry for dynamic tool summary generation
+	tools *tools.ToolRegistry
 }
 
 func getGlobalConfigDir() string {
@@ -85,8 +89,8 @@ func (cb *ContextBuilder) GetTrustLevel() int {
 
 // generateAgentIdentity creates a unique agent identity string
 func generateAgentIdentity() string {
-	b := make([]byte, 16)
-	_, _ = time.Now().UTC().MarshalBinary()
+	// b := make([]byte, 16)
+	// _, _ = time.Now().UTC().MarshalBinary()
 	return fmt.Sprintf("agent-%d", time.Now().UnixNano())
 }
 

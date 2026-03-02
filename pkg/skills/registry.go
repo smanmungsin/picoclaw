@@ -1,3 +1,28 @@
+package skills
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/sipeed/picoclaw/pkg/logger"
+)
+
+// Registry represents a skill registry instance with config
+type Registry struct {
+	config *RegistryConfig
+}
+
+const defaultMaxConcurrentSearches = 4
+
+// NewClawHubRegistry is a stub for ClawHub registry creation
+func NewClawHubRegistry(cfg ClawHubConfig) SkillRegistry {
+	// TODO: implement actual ClawHub registry
+	return nil
+}
+
 // PeerInfo for skills registry negotiation
 type PeerInfo struct {
 	Addr       string
@@ -28,13 +53,14 @@ func (rm *RegistryManager) DistributedPlan(alivePeers []PeerInfo, plan string) e
 	}
 	return nil
 }
+
 // Health check: verify registry config and auto-repair if missing
 func (r *Registry) HealthCheckAndRepair() {
 	if r.config == nil {
-		 logger.ErrorC("skills", "Registry config not set, attempting recovery")
-		 // Attempt to load default config or create minimal config
-		 r.config = &RegistryConfig{Enabled: true}
-		 r.notifyAgent("Created default registry config")
+		logger.ErrorC("skills", "Registry config not set, attempting recovery")
+		// Attempt to load default config or create minimal config
+		r.config = &RegistryConfig{}
+		r.notifyAgent("Created default registry config")
 	}
 }
 
@@ -43,19 +69,8 @@ func (r *Registry) notifyAgent(message string) {
 	logger.WarnCF("skills", "Agent notification", map[string]any{"message": message})
 	// Optionally send to agent bus if available (stub)
 }
-package skills
 
-import (
-	"context"
-	"fmt"
-	"log/slog"
-	"sync"
-	"time"
-)
-
-const (
-	defaultMaxConcurrentSearches = 2
-)
+// ...existing code...
 
 // SearchResult represents a single result from a skill registry search.
 type SearchResult struct {
