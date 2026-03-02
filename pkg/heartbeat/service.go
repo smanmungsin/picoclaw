@@ -78,6 +78,22 @@ func (hs *HeartbeatService) SetHandler(handler HeartbeatHandler) {
 
 // Start begins the heartbeat service
 func (hs *HeartbeatService) Start() error {
+	   // Health check: verify workspace and log file
+	   if hs.workspace == "" {
+		   logger.ErrorC("heartbeat", "Workspace not set, attempting recovery")
+		   hs.workspace = os.TempDir()
+	   }
+	   logFile := filepath.Join(hs.workspace, "heartbeat.log")
+	   if _, err := os.Stat(logFile); os.IsNotExist(err) {
+		   f, err := os.Create(logFile)
+		   if err != nil {
+			   logger.ErrorCF("heartbeat", "Failed to create heartbeat log file", map[string]any{"error": err.Error()})
+			   // Escalate feedback and notify agent
+			   hs.notifyAgent("CRITICAL: Heartbeat log file could not be created")
+		   } else {
+			   f.Close()
+		   }
+	   }
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 
@@ -219,6 +235,7 @@ func (hs *HeartbeatService) executeHeartbeat() {
 func (hs *HeartbeatService) buildPrompt() string {
 	heartbeatPath := filepath.Join(hs.workspace, "HEARTBEAT.md")
 
+<<<<<<< Updated upstream
 	data, err := os.ReadFile(heartbeatPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -228,6 +245,19 @@ func (hs *HeartbeatService) buildPrompt() string {
 		hs.logError("Error reading HEARTBEAT.md: %v", err)
 		return ""
 	}
+=======
+	   data, err := os.ReadFile(heartbeatPath)
+	   if err != nil {
+		   if os.IsNotExist(err) {
+			   hs.createDefaultHeartbeatTemplate()
+			   hs.notifyAgent("HEARTBEAT.md missing, created default template")
+			   return ""
+		   }
+		   hs.logErrorf("Error reading HEARTBEAT.md: %v", err)
+		   hs.notifyAgent(fmt.Sprintf("CRITICAL: Error reading HEARTBEAT.md: %v", err))
+		   return ""
+	   }
+>>>>>>> Stashed changes
 
 	content := string(data)
 	if len(content) == 0 {
@@ -275,11 +305,33 @@ This file contains tasks for the heartbeat service to check periodically.
 Add your heartbeat tasks below this line:
 `
 
+<<<<<<< Updated upstream
 	if err := os.WriteFile(heartbeatPath, []byte(defaultContent), 0644); err != nil {
 		hs.logError("Failed to create default HEARTBEAT.md: %v", err)
 	} else {
 		hs.logInfo("Created default HEARTBEAT.md template")
 	}
+=======
+	   if err := fileutil.WriteFileAtomic(heartbeatPath, []byte(defaultContent), 0o644); err != nil {
+		   hs.logErrorf("Failed to create default HEARTBEAT.md: %v", err)
+		   hs.notifyAgent(fmt.Sprintf("CRITICAL: Failed to create default HEARTBEAT.md: %v", err))
+	   } else {
+		   hs.logInfof("Created default HEARTBEAT.md template")
+		   hs.notifyAgent("Created default HEARTBEAT.md template")
+	   }
+// notifyAgent sends a notification to the agent for critical recovery events
+func (hs *HeartbeatService) notifyAgent(message string) {
+   // Advanced notification: log, escalate, and optionally send to agent bus
+   logger.WarnCF("heartbeat", "Agent notification", map[string]any{"message": message})
+   if hs.bus != nil {
+	   hs.bus.PublishOutbound(bus.OutboundMessage{
+		   Channel: "system",
+		   ChatID:  "agent",
+		   Content: message,
+	   })
+   }
+}
+>>>>>>> Stashed changes
 }
 
 // sendResponse sends the heartbeat response to the last channel

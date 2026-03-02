@@ -1,3 +1,26 @@
+// Health check: verify skills directory and auto-repair if missing
+func (sl *SkillsLoader) HealthCheckAndRepair() {
+   if sl.workspace == "" {
+	   logger.ErrorC("skills", "Workspace not set, attempting recovery")
+	   sl.workspace = os.TempDir()
+   }
+   skillsDir := filepath.Join(sl.workspace, "skills")
+   if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
+	   err := os.MkdirAll(skillsDir, 0o755)
+	   if err != nil {
+		   logger.ErrorCF("skills", "Failed to create skills directory", map[string]any{"error": err.Error()})
+		   sl.notifyAgent("CRITICAL: Skills directory could not be created")
+	   } else {
+		   sl.notifyAgent("Created default skills directory")
+	   }
+   }
+}
+
+// notifyAgent sends a notification to the agent for critical recovery events
+func (sl *SkillsLoader) notifyAgent(message string) {
+   logger.WarnCF("skills", "Agent notification", map[string]any{"message": message})
+   // Optionally send to agent bus if available (stub)
+}
 package skills
 
 import (

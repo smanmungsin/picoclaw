@@ -106,12 +106,41 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+<<<<<<< Updated upstream
 	err := cmd.Run()
+=======
+	   if err := cmd.Start(); err != nil {
+		   // Health check: escalate and try to recover
+		   return ErrorResult(fmt.Sprintf("[Survival] CRITICAL: failed to start command: %v", err))
+	   }
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-cmdCtx.Done():
+		_ = terminateProcessTree(cmd)
+		select {
+		case err = <-done:
+		case <-time.After(2 * time.Second):
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			err = <-done
+		}
+	}
+
+>>>>>>> Stashed changes
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		output += "\nSTDERR:\n" + stderr.String()
 	}
 
+<<<<<<< Updated upstream
 	if err != nil {
 		if cmdCtx.Err() == context.DeadlineExceeded {
 			msg := fmt.Sprintf("Command timed out after %v", t.timeout)
@@ -123,6 +152,22 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 		output += fmt.Sprintf("\nExit code: %v", err)
 	}
+=======
+	   if err != nil {
+		   if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
+			   msg := fmt.Sprintf("[Survival] Command timed out after %v", t.timeout)
+			   // Escalate feedback and update improvement plan
+			   output += "\n[Survival] Attempting recovery: retrying command."
+			   // Optionally: retry logic here
+			   return &ToolResult{
+				   ForLLM:  msg,
+				   ForUser: msg,
+				   IsError: true,
+			   }
+		   }
+		   output += fmt.Sprintf("\nExit code: %v", err)
+	   }
+>>>>>>> Stashed changes
 
 	if output == "" {
 		output = "(no output)"

@@ -18,7 +18,27 @@ type ContextBuilder struct {
 	workspace    string
 	skillsLoader *skills.SkillsLoader
 	memory       *MemoryStore
+<<<<<<< Updated upstream
 	tools        *tools.ToolRegistry // Direct reference to tool registry
+=======
+	identity     string // Unique agent identity
+	character    string // Agent character traits
+	belief       string // Agent belief system
+	trustLevel   int    // Trust score (0-100)
+
+	// Cache for system prompt to avoid rebuilding on every call.
+	// This fixes issue #607: repeated reprocessing of the entire context.
+	// The cache auto-invalidates when workspace source files change (mtime check).
+	systemPromptMutex  sync.RWMutex
+	cachedSystemPrompt string
+	cachedAt           time.Time // max observed mtime across tracked paths at cache build time
+
+	// existedAtCache tracks which source file paths existed the last time the
+	// cache was built. This lets sourceFilesChanged detect files that are newly
+	// created (didn't exist at cache time, now exist) or deleted (existed at
+	// cache time, now gone) — both of which should trigger a cache rebuild.
+	existedAtCache map[string]bool
+>>>>>>> Stashed changes
 }
 
 func getGlobalConfigDir() string {
@@ -40,7 +60,47 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 		workspace:    workspace,
 		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
 		memory:       NewMemoryStore(workspace),
+		identity:     generateAgentIdentity(),
+		character:    defaultAgentCharacter(),
+		belief:       defaultAgentBelief(),
+		trustLevel:   90,
 	}
+// GetIdentity returns the agent's unique identity
+func (cb *ContextBuilder) GetIdentity() string {
+	return cb.identity
+}
+
+// GetCharacter returns the agent's character traits
+func (cb *ContextBuilder) GetCharacter() string {
+	return cb.character
+}
+
+// GetBelief returns the agent's belief system
+func (cb *ContextBuilder) GetBelief() string {
+	return cb.belief
+}
+
+// GetTrustLevel returns the agent's trust score
+func (cb *ContextBuilder) GetTrustLevel() int {
+	return cb.trustLevel
+}
+
+// generateAgentIdentity creates a unique agent identity string
+func generateAgentIdentity() string {
+	b := make([]byte, 16)
+	_, _ = time.Now().UTC().MarshalBinary()
+	return fmt.Sprintf("agent-%d", time.Now().UnixNano())
+}
+
+// defaultAgentCharacter returns a default character trait string
+func defaultAgentCharacter() string {
+	return "curious, collaborative, loving"
+}
+
+// defaultAgentBelief returns a default belief system string
+func defaultAgentBelief() string {
+	return "trust, love, mutual support"
+}
 }
 
 // SetToolsRegistry sets the tools registry for dynamic tool summary generation.
@@ -110,7 +170,8 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 	parts := []string{}
 
 	// Core identity section
-	parts = append(parts, cb.getIdentity())
+	identityBlock := fmt.Sprintf("# Agent Identity\nIdentity: %s\nCharacter: %s\nBelief: %s\nTrustLevel: %d", cb.GetIdentity(), cb.GetCharacter(), cb.GetBelief(), cb.GetTrustLevel())
+	parts = append(parts, identityBlock)
 
 	// Bootstrap files
 	bootstrapContent := cb.LoadBootstrapFiles()
