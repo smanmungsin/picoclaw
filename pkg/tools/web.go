@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// DefaultWebFetchTool is the global instance used by the agent for web/document fetches.
+var DefaultWebFetchTool = NewWebFetchTool(50000)
+
 const (
 	userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
@@ -267,6 +270,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 
 type WebFetchTool struct {
 	maxChars int
+	Memory   interface{ WriteLongTerm(content string) error }
 }
 
 func NewWebFetchTool(maxChars int) *WebFetchTool {
@@ -309,6 +313,8 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 	if !ok {
 		return ErrorResult("url is required")
 	}
+
+	// Prepare to persist fetched content to memory after extraction
 
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
@@ -390,6 +396,16 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 	truncated := len(text) > maxChars
 	if truncated {
 		text = text[:maxChars]
+	}
+
+	// Persist the fetched content to long-term memory if memory is set
+	if t.Memory != nil && text != "" {
+		snippet := text
+		if len(snippet) > 1000 {
+			snippet = snippet[:1000] + "..."
+		}
+		docSummary := fmt.Sprintf("[WebFetch] %s\nType: %s\nFetched: %d chars\n---\n%s", urlStr, extractor, len(text), snippet)
+		_ = t.Memory.WriteLongTerm(docSummary + "\n\n")
 	}
 
 	result := map[string]interface{}{

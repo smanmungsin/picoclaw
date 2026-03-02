@@ -17,6 +17,9 @@ type BrowserToolOptions struct {
 	CDPPort  int    // Chrome DevTools Protocol port (default 9222)
 }
 
+// DefaultBrowserTool is the global instance used by the agent for browser automation.
+var DefaultBrowserTool = NewBrowserTool(BrowserToolOptions{})
+
 // BrowserTool wraps the agent-browser CLI for headless browser automation.
 // It delegates all browser complexity to the external `agent-browser` binary.
 type BrowserTool struct {
@@ -24,6 +27,7 @@ type BrowserTool struct {
 	headless bool
 	timeout  time.Duration
 	cdpPort  int
+	Memory   interface{ WriteLongTerm(content string) error }
 }
 
 // NewBrowserTool creates a new BrowserTool with the given options.
@@ -99,6 +103,8 @@ func (t *BrowserTool) Execute(ctx context.Context, args map[string]interface{}) 
 		return ErrorResult("command is required (e.g. 'open https://example.com')")
 	}
 
+	// After execution, persist context for relevant commands
+
 	// Build the full agent-browser command line
 	cmdArgs := t.buildArgs(command)
 
@@ -159,6 +165,18 @@ func (t *BrowserTool) Execute(ctx context.Context, args map[string]interface{}) 
 		}
 	}
 
+	// Persist context for relevant commands (open, get text, get title, get url, eval, etc)
+	if t.Memory != nil && command != "" && err == nil {
+		cmdLower := strings.ToLower(command)
+		if strings.HasPrefix(cmdLower, "open ") || strings.HasPrefix(cmdLower, "get text") || strings.HasPrefix(cmdLower, "get title") || strings.HasPrefix(cmdLower, "get url") || strings.HasPrefix(cmdLower, "eval ") {
+			snippet := output
+			if len(snippet) > 1000 {
+				snippet = snippet[:1000] + "..."
+			}
+			docSummary := fmt.Sprintf("[Browser] Command: %s\n---\n%s", command, snippet)
+			_ = t.Memory.WriteLongTerm(docSummary + "\n\n")
+		}
+	}
 	return &ToolResult{
 		ForLLM:  output,
 		ForUser: output,

@@ -56,10 +56,17 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 	builtinSkillsDir := filepath.Join(wd, "skills")
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
 
+	mem := NewMemoryStore(workspace)
+	// Wire memory into WebFetchTool for persistent document/web memory
+	tools.DefaultWebFetchTool.Memory = mem
+	// If you have a global or default BrowserTool instance, wire memory here as well
+	if tools.DefaultBrowserTool != nil {
+		tools.DefaultBrowserTool.Memory = mem
+	}
 	return &ContextBuilder{
 		workspace:    workspace,
 		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
-		memory:       NewMemoryStore(workspace),
+		memory:       mem,
 		identity:     generateAgentIdentity(),
 		character:    defaultAgentCharacter(),
 		belief:       defaultAgentBelief(),
