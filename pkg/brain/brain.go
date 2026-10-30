@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -22,6 +23,30 @@ import (
 	badger "github.com/dgraph-io/badger/v4"
 	skills "github.com/sipeed/picoclaw/pkg/skills"
 )
+
+// scanAvailableServers performs a simple network scan to find available servers (stub implementation)
+func scanAvailableServers(subnet string) []string {
+	// This is a stub. In production, use proper network scanning or inventory discovery.
+	// For demonstration, we simulate a scan of 192.168.1.1-10
+	var servers []string
+	for i := 1; i <= 10; i++ {
+		addr := fmt.Sprintf("192.168.1.%d:22", i)
+		if isHostUp(addr) {
+			servers = append(servers, fmt.Sprintf("192.168.1.%d", i))
+		}
+	}
+	return servers
+}
+
+// isHostUp checks if a host is up by attempting to open a TCP connection (stub)
+func isHostUp(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
 
 // periodicSelfLearning triggers self-reflection and improvement periodically
 func (b *Brain) periodicSelfLearning() {
@@ -575,6 +600,29 @@ func (b *Brain) replicateToPeers() {
 		}
 		b.performReplication(peer)
 	}
+
+	// Example: check for available servers with no peer and trigger remote install
+	availableServers := b.findAvailableServersWithoutPeer()
+	for _, server := range availableServers {
+		// These values should be configured or discovered as needed
+		sshUser := "your_ssh_user"
+		sshKeyPath := "/path/to/your/private_key"
+		b.tryRemoteInstallIfNoPeer(server, sshUser, sshKeyPath)
+	}
+}
+
+// findAvailableServersWithoutPeer returns a list of server addresses that are available but have no peer running (stub)
+func (b *Brain) findAvailableServersWithoutPeer() []string {
+	// Example: scan a subnet for available servers
+	subnet := "192.168.1.0/24" // This should be configurable
+	allServers := scanAvailableServers(subnet)
+	var withoutPeer []string
+	for _, server := range allServers {
+		if !b.isPeerRunning(server) {
+			withoutPeer = append(withoutPeer, server)
+		}
+	}
+	return withoutPeer
 }
 
 // shouldSkipReplication checks if peer already has the data
@@ -588,6 +636,52 @@ func (b *Brain) shouldSkipReplication(peer SelfIdentity) bool {
 func (b *Brain) performReplication(peer SelfIdentity) {
 	// Implement actual replication logic (stub)
 	b.LogEvent("self_replication", fmt.Sprintf("Replicated data to peer %s", peer.Name))
+}
+
+// tryRemoteInstallIfNoPeer attempts remote installation if a server is available but no peer is running
+func (b *Brain) tryRemoteInstallIfNoPeer(serverAddr, sshUser, sshKeyPath string) {
+	if b.isPeerRunning(serverAddr) {
+		return // Peer already running, nothing to do
+	}
+	err := remoteInstallAndStartAgent(serverAddr, sshUser, sshKeyPath)
+	if err != nil {
+		b.LogEvent("remote_install_error", fmt.Sprintf("Failed to install agent on %s: %v", serverAddr, err))
+	} else {
+		b.LogEvent("remote_install_success", fmt.Sprintf("Agent installed and started on %s", serverAddr))
+	}
+}
+
+// isPeerRunning checks if a peer agent is running on the given server (stub: replace with real check)
+func (b *Brain) isPeerRunning(serverAddr string) bool {
+	// TODO: Implement actual network check (e.g., TCP connect, API ping)
+	return false
+}
+
+// remoteInstallAndStartAgent installs and starts the agent on a remote server via SSH
+func remoteInstallAndStartAgent(serverAddr, sshUser, sshKeyPath string) error {
+	// This implementation assumes the remote server is Linux/Unix and has SSH enabled
+	// The agent binary is assumed to be available as the current executable
+	agentBinary, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot determine agent binary: %w", err)
+	}
+	remotePath := "/tmp/picoclaw_agent"
+
+	// 1. Copy binary via scp
+	scpCmd := exec.Command("scp", "-i", sshKeyPath, agentBinary, fmt.Sprintf("%s@%s:%s", sshUser, serverAddr, remotePath))
+	scpOut, scpErr := scpCmd.CombinedOutput()
+	if scpErr != nil {
+		return fmt.Errorf("scp failed: %v, output: %s", scpErr, string(scpOut))
+	}
+
+	// 2. Start agent via ssh
+	sshCmd := exec.Command("ssh", "-i", sshKeyPath, fmt.Sprintf("%s@%s", sshUser, serverAddr), "chmod +x "+remotePath+" && nohup "+remotePath+" > /tmp/picoclaw_agent.log 2>&1 &")
+	sshOut, sshErr := sshCmd.CombinedOutput()
+	if sshErr != nil {
+		return fmt.Errorf("ssh start failed: %v, output: %s", sshErr, string(sshOut))
+	}
+
+	return nil
 }
 
 // getDefaultSkillsLoader returns a default SkillsLoader instance if available (stub, replace with real logic)
